@@ -414,6 +414,50 @@ def run():
         check("build_workbook survives two hal names colliding at 31-char Excel sheet limit", False, str(e))
 
     # ============================================================
+    # build_workbook — ét ark pr. opvisningshal, forrest i filen
+    # ============================================================
+    from openpyxl import load_workbook
+
+    halls_two = [{"name": "Store sal", "startTime": "09:00"}, {"name": "Lille sal/B", "startTime": "10:00"}]
+
+    def team(rid, hold, hal, order):
+        return {"id": rid, "Hold": hold, "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
+                "AlderRaw": "voksen", "OpvisningHal": hal, "Varighed": 10, "OpvarmningMinOverride": None,
+                "OpvarmningHalOverride": None, "Order": order}
+
+    rows_two = [
+        team("s2", "Store B", "Store sal", 2),
+        team("l0", "Lille A", "Lille sal/B", 0),
+        engine.new_special_row("Store sal", "pause", 1),
+        team("s0", "Store A", "Store sal", 0),
+    ]
+    plan_two = engine.compute_plan(engine.build_dataframe(rows_two, halls_two), ["Hal A"], "Hal A")
+    wb = load_workbook(engine.build_workbook(plan_two, [h["name"] for h in halls_two]))
+    check(
+        "export: first sheets are one per show hall, in hall order",
+        wb.sheetnames[:2] == ["Opvisning Store sal", "Opvisning Lille salB"],
+        f"sheets={wb.sheetnames}",
+    )
+    store = [r[0] for r in wb["Opvisning Store sal"].iter_rows(min_row=2, values_only=True)]
+    check("export: show hall sheet lists the program in order, incl. pause",
+          store == ["Store A", "Pause", "Store B"], f"got {store}")
+    lille = [r[0] for r in wb["Opvisning Lille salB"].iter_rows(min_row=2, values_only=True)]
+    check("export: show hall sheet only has that hall's rows", lille == ["Lille A"], f"got {lille}")
+    check("export: the existing sheets are kept after the hall sheets",
+          {"Output", "OpvarmningPlan", "Hal A"} <= set(wb.sheetnames[2:]), f"sheets={wb.sheetnames}")
+
+    # arknavne skal være unikke, også når de klippes ved Excels 31 tegn
+    long_show = [{"name": "En meget lang opvisningshal nummer 1", "startTime": "09:00"},
+                 {"name": "En meget lang opvisningshal nummer 2", "startTime": "09:00"}]
+    rows_ls = [team("x1", "X1", long_show[0]["name"], 0), team("x2", "X2", long_show[1]["name"], 0)]
+    plan_ls = engine.compute_plan(engine.build_dataframe(rows_ls, long_show), ["Hal A"], "Hal A")
+    wb_ls = load_workbook(engine.build_workbook(plan_ls, [h["name"] for h in long_show]))
+    firsts = [[r[0] for r in wb_ls[n].iter_rows(min_row=2, values_only=True)] for n in wb_ls.sheetnames[:2]]
+    check("export: two long hall names get two separate sheets with the right teams",
+          firsts == [["X1"], ["X2"]] and all(len(n) <= 31 for n in wb_ls.sheetnames),
+          f"sheets={wb_ls.sheetnames} content={firsts}")
+
+    # ============================================================
     # summary
     # ============================================================
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

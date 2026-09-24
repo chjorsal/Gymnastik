@@ -7,7 +7,7 @@ reglerne kun findes ét sted.
 Brug:
     python lav_opvarmning_final.py fil1.xlsx fil2.xlsx ...
 
-Hver Excel-fil bliver sin egen opvisningshal (opkaldt efter filnavnet), og
+Hver Excel-fil bliver sin egen opvisningshal (fx "Arena" fra filnavnet), og
 hallen starter på klokkeslættet i filens første 'Tid'-celle. Resultatet
 gemmes som 'opvisning_med_opvarmning.xlsx' i den mappe, scriptet køres fra.
 """
@@ -27,17 +27,17 @@ OUTPUT_FILE = "opvisning_med_opvarmning.xlsx"
 def build_plan(paths):
     raw_rows, show_halls = [], []
     for path in map(Path, paths):
-        hal_navn = path.stem
+        hal_navn = engine.clean_hal_name(path.stem)
         rows, start = engine.load_excel_bytes(path.name, path.read_bytes(), hal_navn, 0)
         show_halls.append({"name": hal_navn, "startTime": start or "09:00"})
         raw_rows.extend(rows)
     df = engine.build_dataframe(raw_rows, show_halls)
-    return engine.compute_plan(df, OPVARMNINGS_HALLER, PRIORITET_HAL)
+    return engine.compute_plan(df, OPVARMNINGS_HALLER, PRIORITET_HAL), [h["name"] for h in show_halls]
 
 
 def main(paths):
-    plan = build_plan(paths)
-    Path(OUTPUT_FILE).write_bytes(engine.build_workbook(plan).getvalue())
+    plan, show_hall_names = build_plan(paths)
+    Path(OUTPUT_FILE).write_bytes(engine.build_workbook(plan, show_hall_names).getvalue())
 
     counts = plan["Status"].value_counts()
     print(f"Færdig! Filen '{OUTPUT_FILE}' er oprettet.")

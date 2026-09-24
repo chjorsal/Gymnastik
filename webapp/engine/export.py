@@ -1,6 +1,7 @@
 """Excel-eksport af den beregnede plan (samme format som generation 1.0)."""
 
 from io import BytesIO
+from typing import List, Optional
 
 import pandas as pd
 from openpyxl.styles import Font, PatternFill
@@ -26,6 +27,22 @@ STATUS_STYLES = {
     "OK": (_fill("90EE90"), False, Font(color="000000", bold=True)),
     "IGNORERET": (_fill("D3D3D3"), True, None),
 }
+
+
+_INVALID_SHEET_CHARS = str.maketrans("", "", "[]:*?/\\")
+
+
+def _sheet_name(raw: str, used: set) -> str:
+    """Gyldigt og unikt Excel-arknavn: uden de tegn Excel forbyder, højst 31
+    tegn, og med ' (2)', ' (3)' ... hvis navnet (efter afkortning) er brugt."""
+    base = str(raw).translate(_INVALID_SHEET_CHARS).strip() or "Ark"
+    name, n = base[:31], 2
+    while name.lower() in used:
+        suffix = f" ({n})"
+        name = base[:31 - len(suffix)] + suffix
+        n += 1
+    used.add(name.lower())
+    return name
 
 
 def _hal_sheet_columns(columns) -> list:
@@ -68,7 +85,9 @@ def _style_output_sheet(ws) -> None:
             status_cell.font = font
 
 
-def build_workbook(df_all: pd.DataFrame) -> BytesIO:
+def build_workbook(df_all: pd.DataFrame, show_halls: Optional[List[str]] = None) -> BytesIO:
+    """show_halls: opvisningshallernes navne i den rækkefølge, deres ark skal
+    stå i. Udelades den, bruges rækkefølgen hallerne optræder i data."""
     out = df_all.copy()
     out["OpvisningTid"] = out["OpvisningStart"].apply(fmt_time)
     out["OpvarmningStartTid"] = out["OpvarmningStart"].apply(fmt_time)
@@ -79,8 +98,20 @@ def build_workbook(df_all: pd.DataFrame) -> BytesIO:
     hal_cols = [c for c in HAL_COLS if c in out.columns]
     ok_rows = out[out["Status"] == "OK"]
 
+    if show_halls is None:
+        show_halls = list(dict.fromkeys(out["OpvisningHal"].dropna()))
+    used = {"output", "opvarmningplan", "mangler opvarmning"}
+
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        # Ét ark pr. opvisningshal forrest — programmet i rækkefølge, klar
+        # til at lægge ind i andre systemer.
+        for hal in show_halls:
+            hal_rows = out[out["OpvisningHal"] == hal].sort_values("Order")
+            sheet_name = _sheet_name(f"Opvisning {hal}", used)
+            hal_rows[export_cols].to_excel(writer, index=False, sheet_name=sheet_name)
+            _style_hal_sheet(writer.sheets[sheet_name])
+
         out[export_cols].to_excel(writer, index=False, sheet_name="Output")
 
         ok_rows[export_cols].sort_values(["OpvarmningHal", "OpvarmningStartTid"]).to_excel(
@@ -96,7 +127,7 @@ def build_workbook(df_all: pd.DataFrame) -> BytesIO:
                 continue
             hal_df = ok_rows[ok_rows["OpvarmningHal"] == hal].sort_values("OpvarmningStartTid")[hal_cols]
             hal_df.columns = _hal_sheet_columns(hal_df.columns)
-            sheet_name = str(hal)[:31]
+            sheet_name = _sheet_name(hal, used)
             hal_df.to_excel(writer, index=False, sheet_name=sheet_name)
             _style_hal_sheet(writer.sheets[sheet_name])
 

@@ -502,7 +502,7 @@ def delete_show_hall(payload: HallDelete):
 @app.get("/api/export.xlsx")
 def export_xlsx():
     df = recompute_df()
-    buf = engine.build_workbook(df)
+    buf = engine.build_workbook(df, show_hal_names())
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
