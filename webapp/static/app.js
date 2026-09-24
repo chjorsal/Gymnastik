@@ -7,8 +7,6 @@ let STATE = { warmupHalls: [], priorityHall: null, showHalls: [], rows: [], sche
 let activeHal = localStorage.getItem(ACTIVE_HAL_KEY) || null;
 // Siden åbner altid på oversigten.
 let currentView = "oversigt";
-// Opvisningshal som den næste valgte fil skal lægges i (null = navn fra filnavnet).
-let uploadTargetHal = null;
 let activeWarmupHal = localStorage.getItem(ACTIVE_WARMUP_HAL_KEY) || null;
 
 // ---------- Ikoner ----------
@@ -131,12 +129,9 @@ async function init() {
   render();
 
   const fileInput = document.getElementById("file-input");
-  fileInput.addEventListener("change", () => {
-    uploadFiles(fileInput.files, uploadTargetHal);
-    uploadTargetHal = null;
-  });
+  fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
   document.querySelectorAll("#btn-upload, .js-upload").forEach((btn) => {
-    btn.addEventListener("click", () => chooseFileFor(null));
+    btn.addEventListener("click", () => fileInput.click());
   });
   document.getElementById("onb-warmup-form").addEventListener("submit", (e) => onHallCreate(e, "warmup"));
   document.getElementById("onb-show-form").addEventListener("submit", onShowHallCreate);
@@ -152,11 +147,6 @@ async function init() {
   document.querySelectorAll(".add-special").forEach((btn) => {
     btn.addEventListener("click", () => onAddSpecial(btn.dataset.type));
   });
-}
-
-function chooseFileFor(hal) {
-  uploadTargetHal = hal;
-  document.getElementById("file-input").click();
 }
 
 // Opretter en opvisningshal med starttid i ét trin (fra "Kom i gang").
@@ -176,7 +166,11 @@ async function onShowHallCreate(e) {
   nameInput.focus();
 }
 
-async function uploadFiles(files, hal = null) {
+// Alle hold lægges i den første opvisningshal; brugeren fordeler dem selv
+// bagefter under Program. Findes der ingen opvisningshal endnu, opretter
+// serveren en ud fra filnavnet.
+async function uploadFiles(files) {
+  const hal = STATE.showHalls.length ? STATE.showHalls[0].name : null;
   const input = document.getElementById("file-input");
   const xlsx = Array.from(files || []).filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
   if (!xlsx.length) {
@@ -436,14 +430,7 @@ function renderOnboarding() {
 
   const showList = document.getElementById("onb-show-list");
   showList.replaceChildren(...STATE.showHalls.map((hal) => {
-    const upload = document.createElement("button");
-    upload.type = "button";
-    upload.className = "btn btn-sm btn-primary";
-    upload.textContent = "Vælg Excel";
-    upload.title = `Indlæs programmet for ${hal.name}`;
-    upload.addEventListener("click", () => chooseFileFor(hal.name));
     return onbItem(hal.name, `start ${hal.startTime}`, [
-      upload,
       removeButton(`Fjern ${hal.name}`, () => apiJSON("/api/halls/show", "DELETE", { name: hal.name })),
     ]);
   }));
