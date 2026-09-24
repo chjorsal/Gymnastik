@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=33">
+<link rel="stylesheet" href="style.css?v=35">
 </head>
 <body>
 
@@ -119,17 +119,12 @@
       <div id="overview-data" class="hidden">
         <button id="problem-banner" type="button" class="problem-banner hidden"></button>
 
-        <section class="band">
-          <div class="section-head">
-            <h2 class="section-title">Opvarmning i løbet af dagen</h2>
-            <div id="timeline-legend" class="legend"></div>
-          </div>
-          <div class="timeline-scroll">
-            <div id="timeline" class="timeline"></div>
-          </div>
+        <section class="hall-section">
+          <h2 class="section-title">Opvarmningshaller</h2>
+          <ul id="warmup-hall-summary" class="hall-rows"></ul>
         </section>
 
-        <section class="show-halls">
+        <section class="hall-section">
           <h2 class="section-title">Opvisningshaller</h2>
           <ul id="show-hall-summary" class="hall-rows"></ul>
         </section>
@@ -267,6 +262,6 @@
 </div>
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
-<script src="app.js?v=35"></script>
+<script src="app.js?v=36"></script>
 </body>
 </html>
