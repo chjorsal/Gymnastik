@@ -350,6 +350,11 @@ function fmtMinutes(min) {
   return `${String(h).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 }
 
+function halColor(name) {
+  const i = STATE.showHalls.findIndex((h) => h.name === name);
+  return `var(--hal-${(i < 0 ? 0 : i) % 5})`;
+}
+
 function renderOverview() {
   const teams = STATE.rows.filter((r) => r.needsWarmup);
   const onboarding = document.getElementById("onboarding");
@@ -363,7 +368,7 @@ function renderOverview() {
   }
 
   renderProblemBanner();
-  renderWarmupHallSummary(teams);
+  renderTimeline(teams);
   renderShowHallSummary();
 }
 
@@ -447,75 +452,126 @@ function renderProblemBanner() {
   banner.onclick = () => setView("opvarmning");
 }
 
-// Én klikbar række i en af oversigtens hal-lister.
-function hallRow({ name, tag, time, countText, problem, openText, onOpen }) {
-  const li = document.createElement("li");
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "hall-row";
-  btn.addEventListener("click", onOpen);
+function renderTimeline(teams) {
+  const el = document.getElementById("timeline");
+  const legend = document.getElementById("timeline-legend");
+  el.replaceChildren();
+  legend.replaceChildren();
 
-  const nameEl = document.createElement("span");
-  nameEl.className = "hall-row-name";
-  nameEl.textContent = name;
-  if (tag) {
-    const tagEl = document.createElement("span");
-    tagEl.className = "hall-row-tag";
-    tagEl.textContent = tag;
-    nameEl.appendChild(tagEl);
+  const placed = teams.filter((r) => r.status === "OK" && r.opvarmningStart);
+  if (!placed.length || !STATE.warmupHalls.length) {
+    el.innerHTML = '<p class="text-body-secondary mb-0">Ingen hold har fået opvarmning endnu.</p>';
+    return;
   }
-  const timeEl = document.createElement("span");
-  timeEl.className = "hall-row-time";
-  timeEl.textContent = time || "—";
-  const countEl = document.createElement("span");
-  countEl.className = problem ? "hall-row-problem" : "hall-row-count";
-  countEl.textContent = countText;
-  const openEl = document.createElement("span");
-  openEl.className = "hall-row-open";
-  openEl.textContent = openText;
 
-  btn.append(nameEl, timeEl, countEl, openEl);
-  li.appendChild(btn);
-  return li;
-}
+  // Tidsaksen går fra første hele time før den første opvarmning til
+  // første hele time efter den sidste.
+  const starts = placed.map((r) => toMinutes(r.opvarmningStart));
+  const ends = placed.map((r) => toMinutes(r.opvarmningSlut));
+  const from = Math.floor(Math.min(...starts) / 60) * 60;
+  const to = Math.ceil(Math.max(...ends) / 60) * 60;
+  const span = Math.max(to - from, 60);
+  const pct = (min) => ((min - from) / span) * 100;
+  const hourW = `${(60 / span) * 100}%`;
 
-function renderWarmupHallSummary(teams) {
-  const list = document.getElementById("warmup-hall-summary");
-  list.replaceChildren(...STATE.warmupHalls.map((hal) => {
-    const placed = teams
-      .filter((r) => r.status === "OK" && r.opvarmningHalBeregnet === hal)
-      .sort((a, b) => a.opvarmningStart.localeCompare(b.opvarmningStart));
-    const lastEnd = placed.map((r) => r.opvarmningSlut).sort().pop();
-    return hallRow({
-      name: hal,
-      tag: hal === STATE.priorityHall && STATE.warmupHalls.length > 1 ? "Fyldes først" : "",
-      time: placed.length ? `${placed[0].opvarmningStart}–${lastEnd}` : "",
-      countText: plural(placed.length, "hold", "hold"),
-      openText: "Åbn opvarmning",
-      onOpen: () => { activeWarmupHal = hal; setView("opvarmning"); },
+  const axis = document.createElement("div");
+  axis.className = "tl-axis";
+  const axisTrack = document.createElement("div");
+  axisTrack.className = "tl-track";
+  for (let t = from; t <= to; t += 60) {
+    const tick = document.createElement("span");
+    tick.className = "tl-tick";
+    tick.style.left = `${pct(t)}%`;
+    tick.textContent = fmtMinutes(t).slice(0, 2);
+    axisTrack.appendChild(tick);
+  }
+  axis.append(document.createElement("span"), axisTrack);
+  el.appendChild(axis);
+
+  STATE.warmupHalls.forEach((hal) => {
+    const lane = document.createElement("div");
+    lane.className = "tl-lane";
+
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "tl-lane-name";
+    name.textContent = hal;
+    name.title = `Vis opvarmningen i ${hal}`;
+    name.addEventListener("click", () => { activeWarmupHal = hal; setView("opvarmning"); });
+
+    const track = document.createElement("div");
+    track.className = "tl-track";
+    track.style.setProperty("--hour-w", hourW);
+    track.style.setProperty("--hour-offset", "0");
+
+    placed.filter((r) => r.opvarmningHalBeregnet === hal).forEach((r) => {
+      const s = toMinutes(r.opvarmningStart);
+      const e = toMinutes(r.opvarmningSlut);
+      const block = document.createElement("button");
+      block.type = "button";
+      block.className = "tl-block" + (r.opvarmningStartOverride ? " pinned" : "");
+      block.style.left = `${pct(s)}%`;
+      block.style.width = `${pct(e) - pct(s)}%`;
+      block.style.setProperty("--c", halColor(r.opvisningHal));
+      block.title = `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`;
+      block.setAttribute("aria-label", `${r.hold}, opvarmning ${r.opvarmningStart} til ${r.opvarmningSlut}`);
+      block.addEventListener("click", () => { activeWarmupHal = hal; setView("opvarmning"); });
+      track.appendChild(block);
     });
-  }));
+
+    lane.append(name, track);
+    el.appendChild(lane);
+  });
+
+  STATE.showHalls.forEach((h) => {
+    const item = document.createElement("span");
+    item.className = "legend-item";
+    const sw = document.createElement("span");
+    sw.className = "legend-swatch";
+    sw.style.setProperty("--c", halColor(h.name));
+    item.append(sw, document.createTextNode(h.name));
+    legend.appendChild(item);
+  });
 }
 
 function renderShowHallSummary() {
   const list = document.getElementById("show-hall-summary");
-  list.replaceChildren(...STATE.showHalls.map((hal) => {
+  list.replaceChildren();
+  STATE.showHalls.forEach((hal) => {
     const rows = STATE.rows.filter((r) => r.opvisningHal === hal.name).sort((a, b) => a.order - b.order);
     const teams = rows.filter((r) => r.needsWarmup);
     const problems = teams.filter((r) => r.problemMessage).length;
     const last = rows[rows.length - 1];
     const end = last && last.opvisningTid ? fmtMinutes(toMinutes(last.opvisningTid) + last.varighed) : null;
-    return hallRow({
-      name: hal.name,
-      time: end ? `${hal.startTime}–${end}` : hal.startTime,
-      countText: problems
-        ? `${problems} af ${plural(teams.length, "hold", "hold")} mangler opvarmning`
-        : plural(teams.length, "hold", "hold"),
-      problem: problems > 0,
-      openText: "Åbn program",
-      onOpen: () => { activeHal = hal.name; saveActiveHal(); setView("program"); },
-    });
-  }));
+
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hall-row";
+    btn.addEventListener("click", () => { activeHal = hal.name; saveActiveHal(); setView("program"); });
+
+    const dot = document.createElement("span");
+    dot.className = "hall-row-dot";
+    dot.style.setProperty("--c", halColor(hal.name));
+    const name = document.createElement("span");
+    name.className = "hall-row-name";
+    name.textContent = hal.name;
+    const time = document.createElement("span");
+    time.className = "hall-row-time";
+    time.textContent = end ? `${hal.startTime}–${end}` : hal.startTime;
+    const count = document.createElement("span");
+    count.className = problems ? "hall-row-problem" : "hall-row-count";
+    count.textContent = problems
+      ? `${problems} af ${plural(teams.length, "hold", "hold")} mangler opvarmning`
+      : plural(teams.length, "hold", "hold");
+    const open = document.createElement("span");
+    open.className = "hall-row-open";
+    open.textContent = "Åbn program";
+
+    btn.append(dot, name, time, count, open);
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
 }
 
 function renderHalls() {
