@@ -378,12 +378,6 @@ function renderPageHead() {
 
 // ---------- Oversigt ----------
 
-function toMinutes(hhmm) {
-  if (!hhmm) return null;
-  const [h, m] = hhmm.split(":").map(Number);
-  return h * 60 + m;
-}
-
 function fmtMinutes(min) {
   const h = Math.floor(min / 60) % 24;
   return `${String(h).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
@@ -407,6 +401,7 @@ function renderOverview() {
   }
 
   renderProblemBanner();
+  renderOvernightBanner();
   renderTimeline(teams);
   renderShowHallSummary();
 }
@@ -475,6 +470,35 @@ function renderOnboarding() {
   }));
 }
 
+const DAY_END = 24 * 60;
+
+// Hvornår en opvisningshals program slutter, i minutter fra dagens start
+// (over 1440 = efter midnat). null hvis hallen er tom.
+function hallEndMinutes(halName) {
+  const rows = STATE.rows.filter((r) => r.opvisningHal === halName && r.opvisningMin !== null);
+  if (!rows.length) return null;
+  return Math.max(...rows.map((r) => r.opvisningMin + r.varighed));
+}
+
+function renderOvernightBanner() {
+  const banner = document.getElementById("overnight-banner");
+  const late = STATE.showHalls
+    .map((h) => ({ name: h.name, end: hallEndMinutes(h.name) }))
+    .filter((h) => h.end !== null && h.end > DAY_END);
+  banner.classList.toggle("hidden", late.length === 0);
+  if (!late.length) return;
+  const text = late.map((h) => `${h.name} slutter først kl. ${fmtMinutes(h.end)} om natten`).join(", og ");
+  banner.replaceChildren(
+    icon("warning"),
+    document.createTextNode(`Programmet i ${text}. Fordel holdene på flere opvisningshaller under Program.`),
+  );
+  const action = document.createElement("span");
+  action.className = "banner-action";
+  action.textContent = "Åbn program";
+  banner.appendChild(action);
+  banner.onclick = () => { activeHal = late[0].name; saveActiveHal(); setView("program"); };
+}
+
 function renderProblemBanner() {
   const banner = document.getElementById("problem-banner");
   const count = unplacedRows().length;
@@ -499,14 +523,16 @@ function renderTimeline(teams) {
   el.replaceChildren();
   legend.replaceChildren();
 
-  const placed = teams.filter((r) => r.status === "OK" && r.opvarmningStart);
+  // En dag løber fremad fra starttiden og slutter ved midnat. Det, der ligger
+  // efter midnat, vises ikke her — oversigten advarer om det i stedet.
+  const placed = teams.filter((r) => r.status === "OK" && r.opvarmningStart && r.opvarmningStartMin < DAY_END);
   // Hold uden plads vises i en rød række, hvor opvarmningen skulle have ligget:
   // lige op til holdets opvisning.
   const missing = teams
-    .filter((r) => r.problemMessage && r.opvisningTid)
+    .filter((r) => r.problemMessage && r.opvisningMin !== null && r.opvisningMin <= DAY_END)
     .map((r) => {
       const warm = r.opvarmningMinOverride ?? r.opvarmningMinDefault;
-      const end = toMinutes(r.opvisningTid);
+      const end = r.opvisningMin;
       return { row: r, start: end - warm, end };
     });
 
@@ -516,10 +542,10 @@ function renderTimeline(teams) {
   }
 
   // Tidsaksen går fra hel time før første opvarmning til hel time efter sidste.
-  const starts = placed.map((r) => toMinutes(r.opvarmningStart)).concat(missing.map((m) => m.start));
-  const ends = placed.map((r) => toMinutes(r.opvarmningSlut)).concat(missing.map((m) => m.end));
+  const starts = placed.map((r) => r.opvarmningStartMin).concat(missing.map((m) => m.start));
+  const ends = placed.map((r) => Math.min(r.opvarmningSlutMin, DAY_END)).concat(missing.map((m) => m.end));
   const from = Math.floor(Math.min(...starts) / 60) * 60;
-  const to = Math.ceil(Math.max(...ends) / 60) * 60;
+  const to = Math.min(Math.ceil(Math.max(...ends) / 60) * 60, DAY_END);
   const span = Math.max(to - from, 60);
 
   // Hele pixels i stedet for procenter, så kanter og linjer står skarpt.
@@ -586,8 +612,8 @@ function renderTimeline(teams) {
     const track = lane(hal, open);
     placed.filter((r) => r.opvarmningHalBeregnet === hal).forEach((r) => {
       addBlock(track, {
-        start: toMinutes(r.opvarmningStart),
-        end: toMinutes(r.opvarmningSlut),
+        start: r.opvarmningStartMin,
+        end: Math.min(r.opvarmningSlutMin, DAY_END),
         color: halColor(r.opvisningHal),
         extraClass: r.opvarmningStartOverride ? "pinned" : "",
         title: `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`,
@@ -628,7 +654,8 @@ function renderShowHallSummary() {
     const teams = rows.filter((r) => r.needsWarmup);
     const problems = teams.filter((r) => r.problemMessage).length;
     const last = rows[rows.length - 1];
-    const end = last && last.opvisningTid ? fmtMinutes(toMinutes(last.opvisningTid) + last.varighed) : null;
+    const endMin = hallEndMinutes(hal.name);
+    const end = endMin === null ? null : fmtMinutes(endMin);
 
     const li = document.createElement("li");
     const btn = document.createElement("button");
@@ -644,6 +671,7 @@ function renderShowHallSummary() {
     name.textContent = hal.name;
     const time = document.createElement("span");
     time.className = "hall-row-time";
+    if (endMin !== null && endMin > DAY_END) time.className = "hall-row-problem";
     time.textContent = end ? `${hal.startTime}–${end}` : hal.startTime;
     const count = document.createElement("span");
     count.className = problems ? "hall-row-problem" : "hall-row-count";

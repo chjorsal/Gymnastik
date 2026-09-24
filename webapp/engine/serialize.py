@@ -1,5 +1,6 @@
 """Beregnet plan -> JSON-venlige dicts til frontenden."""
 
+from datetime import datetime
 from typing import List
 
 import pandas as pd
@@ -16,6 +17,19 @@ def problem_message(status: str, warmup_halls: List[str]) -> str:
     return "Mangler plads til opvarmning."
 
 
+def minutes_from_day_start(value):
+    """Minutter fra dagens start (2000-01-01 00:00). Tider efter midnat giver
+    mere end 1440, så de aldrig forveksles med tidlig morgen. None hvis tom."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return int((value - datetime(2000, 1, 1)).total_seconds() // 60)
+
+
 def to_row_dicts(df: pd.DataFrame, warmup_halls: List[str]) -> List[dict]:
     out = []
     for _, r in df.iterrows():
@@ -28,6 +42,9 @@ def to_row_dicts(df: pd.DataFrame, warmup_halls: List[str]) -> List[dict]:
             "varighed": int(r["Varighed"]),
             "order": int(r["Order"]),
             "opvisningTid": fmt_time(r["OpvisningStart"]),
+            "opvisningMin": minutes_from_day_start(r["OpvisningStart"]),
+            "opvarmningStartMin": minutes_from_day_start(r["OpvarmningStart"]),
+            "opvarmningSlutMin": minutes_from_day_start(r["OpvarmningSlut"]),
             "opvarmningMinOverride": override_int(r["OpvarmningMinOverride"]),
             "opvarmningMinDefault": opvarmning_minutter(r["Holdtype"], r["ErBarn"]),
             "opvarmningHalOverride": override_str(r["OpvarmningHalOverride"]),

@@ -458,6 +458,24 @@ def run():
           f"sheets={wb_ls.sheetnames} content={firsts}")
 
     # ============================================================
+    # minutter fra dagens start — så tider efter midnat ikke ligner morgen
+    # ============================================================
+    long_rows = [
+        {"id": f"n{i}", "Hold": f"Hold {i}", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
+         "AlderRaw": "voksen", "OpvisningHal": "Sal", "Varighed": 120, "OpvarmningMinOverride": None,
+         "OpvarmningHalOverride": None, "Order": i}
+        for i in range(9)
+    ]
+    long_plan = engine.compute_plan(engine.build_dataframe(long_rows, [{"name": "Sal", "startTime": "09:00"}]),
+                                    ["Hal A"], "Hal A")
+    dicts = {d["id"]: d for d in engine.to_row_dicts(long_plan, ["Hal A"])}
+    check("row dict has show time in minutes from day start", dicts["n0"]["opvisningMin"] == 9 * 60, dicts["n0"])
+    check("warm-up minutes are given too",
+          dicts["n0"]["opvarmningSlutMin"] - dicts["n0"]["opvarmningStartMin"] == 15, dicts["n0"])
+    check("a show after midnight is past 1440 minutes, not wrapped to morning",
+          dicts["n8"]["opvisningMin"] == 9 * 60 + 8 * 120 and dicts["n8"]["opvisningTid"] == "01:00", dicts["n8"])
+
+    # ============================================================
     # summary
     # ============================================================
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
