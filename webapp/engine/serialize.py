@@ -13,10 +13,7 @@ def problem_message(status: str, warmup_halls: List[str]) -> str:
         return "Ingen opvarmningshaller oprettet — opret mindst én under \"Haller\"."
     if status != "KAN IKKE PLANLÆGGES":
         return ""
-    return (
-        "Dette hold kan ikke gå på opvarmning nu — prøv en kortere "
-        "opvarmningstid, eller flyt holdet i programmet."
-    )
+    return "Mangler plads til opvarmning."
 
 
 def to_row_dicts(df: pd.DataFrame, warmup_halls: List[str]) -> List[dict]:

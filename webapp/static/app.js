@@ -1,12 +1,12 @@
 "use strict";
 
 const ACTIVE_HAL_KEY = "opvarmning_active_hal_v2";
-const SCHEDULE_MODE_KEY = "opvarmning_schedule_mode_v1";
 const ACTIVE_WARMUP_HAL_KEY = "opvarmning_active_warmup_hal_v1";
 
 let STATE = { warmupHalls: [], priorityHall: null, showHalls: [], rows: [], schedule: [] };
 let activeHal = localStorage.getItem(ACTIVE_HAL_KEY) || null;
-let scheduleMode = localStorage.getItem(SCHEDULE_MODE_KEY) || "opvisning";
+// Siden åbner altid på oversigten.
+let currentView = "oversigt";
 let activeWarmupHal = localStorage.getItem(ACTIVE_WARMUP_HAL_KEY) || null;
 
 // ---------- Ikoner ----------
@@ -119,13 +119,24 @@ function readonlyCell(text, extraClass) {
 // ---------- Init ----------
 
 async function init() {
+  // En adresse som .../#program åbner direkte på den visning.
+  const fromHash = location.hash.slice(1);
+  if (VIEWS.includes(fromHash)) currentView = fromHash;
   STATE = await apiGet("/api/state");
   if (!activeHal || !STATE.showHalls.some((h) => h.name === activeHal)) {
     activeHal = STATE.showHalls.length ? STATE.showHalls[0].name : null;
   }
   render();
 
-  document.getElementById("upload-form").addEventListener("submit", onUpload);
+  const fileInput = document.getElementById("file-input");
+  fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
+  document.querySelectorAll("#btn-upload, .js-upload").forEach((btn) => {
+    btn.addEventListener("click", () => fileInput.click());
+  });
+  setupDropzone(document.getElementById("dropzone"));
+  document.querySelectorAll(".rail-link[data-view]").forEach((btn) => {
+    btn.addEventListener("click", () => setView(btn.dataset.view));
+  });
   document.getElementById("btn-reset").addEventListener("click", onReset);
   document.getElementById("warmup-hall-form").addEventListener("submit", (e) => onHallCreate(e, "warmup"));
   document.getElementById("show-hall-form").addEventListener("submit", (e) => onHallCreate(e, "show"));
@@ -134,23 +145,37 @@ async function init() {
   document.querySelectorAll(".add-special").forEach((btn) => {
     btn.addEventListener("click", () => onAddSpecial(btn.dataset.type));
   });
-  document.querySelectorAll(".mode-btn").forEach((btn) => {
-    btn.addEventListener("click", () => setScheduleMode(btn.dataset.mode));
-  });
 }
 
-async function onUpload(e) {
-  e.preventDefault();
+async function uploadFiles(files) {
   const input = document.getElementById("file-input");
-  if (!input.files.length) return;
+  const xlsx = Array.from(files || []).filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
+  if (!xlsx.length) {
+    if (files && files.length) alert("Kun Excel-filer (.xlsx) kan indlæses.");
+    return;
+  }
   const fd = new FormData();
-  for (const f of input.files) fd.append("files", f);
+  xlsx.forEach((f) => fd.append("files", f));
   STATE = await readState(await fetch("/api/upload", { method: "POST", body: fd }));
   input.value = "";
   if (!activeHal && STATE.showHalls.length) {
     activeHal = STATE.showHalls[STATE.showHalls.length - 1].name;
+    saveActiveHal();
   }
   render();
+}
+
+function setupDropzone(zone) {
+  zone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    zone.classList.add("drag-over");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    zone.classList.remove("drag-over");
+    uploadFiles(e.dataTransfer.files);
+  });
 }
 
 async function onReset() {
@@ -195,10 +220,10 @@ function setActiveHal(name) {
   render();
 }
 
-function setScheduleMode(mode) {
-  scheduleMode = mode;
-  try { localStorage.setItem(SCHEDULE_MODE_KEY, mode); } catch (e) {}
+function setView(view) {
+  currentView = view;
   render();
+  window.scrollTo(0, 0);
 }
 
 function setActiveWarmupHal(name) {
@@ -211,33 +236,260 @@ function setActiveWarmupHal(name) {
 // rette det med det samme (varighed/opvarmningstid) i hovedlisten.
 function jumpToRow(opvisningHal) {
   if (!opvisningHal) return;
-  scheduleMode = "opvisning";
-  try { localStorage.setItem(SCHEDULE_MODE_KEY, "opvisning"); } catch (e) {}
   activeHal = opvisningHal;
   saveActiveHal();
-  render();
+  setView("program");
 }
 
 // ---------- Render ----------
 
+const VIEWS = ["oversigt", "program", "opvarmning"];
+
+function unplacedRows() {
+  return STATE.rows.filter((r) => r.needsWarmup && r.problemMessage);
+}
+
 function render() {
   renderHalls();
-  renderSchedule();
+  renderNav();
+  renderPageHead();
 
-  const opvisningView = document.getElementById("opvisning-view");
-  const opvarmningView = document.getElementById("opvarmning-view");
-  if (scheduleMode === "opvarmning") {
-    opvisningView.classList.add("hidden");
-    opvarmningView.classList.remove("hidden");
-    renderUnplacedWarmup();
-    renderWarmupTable();
-  } else {
-    opvarmningView.classList.add("hidden");
-    opvisningView.classList.remove("hidden");
+  VIEWS.forEach((v) => {
+    document.getElementById(`${v}-view`).classList.toggle("hidden", v !== currentView);
+  });
+  if (currentView === "oversigt") {
+    renderOverview();
+  } else if (currentView === "program") {
     renderHalTabs();
     renderToolbar();
     renderTable();
+  } else {
+    renderWarmupHalTabs();
+    renderUnplacedWarmup();
+    renderWarmupTable();
   }
+}
+
+function renderNav() {
+  document.querySelectorAll(".rail-link[data-view]").forEach((btn) => {
+    const active = btn.dataset.view === currentView;
+    btn.classList.toggle("active", active);
+    if (active) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  });
+  const count = unplacedRows().length;
+  const badge = document.getElementById("problem-count");
+  badge.textContent = count;
+  badge.title = `${count} hold mangler plads til opvarmning`;
+  badge.classList.toggle("hidden", count === 0);
+}
+
+function plural(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function renderPageHead() {
+  const title = document.getElementById("page-title");
+  const sub = document.getElementById("page-sub");
+  const teams = STATE.rows.filter((r) => r.needsWarmup).length;
+  // Der er ingen plan at hente, før der er indlæst hold.
+  document.getElementById("btn-export").classList.toggle("hidden", !teams);
+
+  if (currentView === "oversigt") {
+    if (!teams) {
+      title.textContent = "Kom i gang";
+      sub.textContent = "Lav en opvarmningsplan til dagens opvisninger i tre trin.";
+    } else {
+      title.textContent = "Oversigt";
+      sub.textContent = `${plural(teams, "hold", "hold")} i ${plural(STATE.showHalls.length, "opvisningshal", "opvisningshaller")}, `
+        + `fordelt på ${plural(STATE.warmupHalls.length, "opvarmningshal", "opvarmningshaller")}.`;
+    }
+  } else if (currentView === "program") {
+    title.textContent = "Program";
+    sub.textContent = "Træk i rækkerne for at ændre rækkefølgen. Tiderne regnes ud automatisk.";
+  } else {
+    title.textContent = "Opvarmning";
+    sub.textContent = "Træk et hold hen på en anden hal for at flytte det, eller op på et tidligere hold for at bytte tid.";
+  }
+}
+
+// ---------- Oversigt ----------
+
+function toMinutes(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function fmtMinutes(min) {
+  const h = Math.floor(min / 60) % 24;
+  return `${String(h).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+function halColor(name) {
+  const i = STATE.showHalls.findIndex((h) => h.name === name);
+  return `var(--hal-${(i < 0 ? 0 : i) % 5})`;
+}
+
+function renderOverview() {
+  const teams = STATE.rows.filter((r) => r.needsWarmup);
+  const onboarding = document.getElementById("onboarding");
+  const data = document.getElementById("overview-data");
+  onboarding.classList.toggle("hidden", teams.length > 0);
+  data.classList.toggle("hidden", teams.length === 0);
+
+  if (!teams.length) {
+    const hallsDone = STATE.warmupHalls.length > 0;
+    document.getElementById("step-halls").classList.toggle("done", hallsDone);
+    document.getElementById("step-halls").classList.toggle("current", !hallsDone);
+    document.getElementById("step-upload").classList.toggle("current", hallsDone);
+    document.getElementById("step-halls-text").textContent = hallsDone
+      ? `Klar: ${STATE.warmupHalls.join(", ")}.`
+      : "Opret de haller, holdene kan varme op i.";
+    return;
+  }
+
+  renderProblemBanner();
+  renderTimeline(teams);
+  renderShowHallSummary();
+}
+
+function renderProblemBanner() {
+  const banner = document.getElementById("problem-banner");
+  const count = unplacedRows().length;
+  banner.classList.toggle("hidden", count === 0);
+  if (!count) return;
+  banner.replaceChildren(
+    icon("warning"),
+    document.createTextNode(`${plural(count, "hold mangler", "hold mangler")} plads til opvarmning.`),
+  );
+  const action = document.createElement("span");
+  action.className = "banner-action";
+  action.textContent = "Løs det";
+  banner.appendChild(action);
+  banner.onclick = () => setView("opvarmning");
+}
+
+function renderTimeline(teams) {
+  const el = document.getElementById("timeline");
+  const legend = document.getElementById("timeline-legend");
+  el.replaceChildren();
+  legend.replaceChildren();
+
+  const placed = teams.filter((r) => r.status === "OK" && r.opvarmningStart);
+  if (!placed.length || !STATE.warmupHalls.length) {
+    el.innerHTML = '<p class="text-body-secondary mb-0">Ingen hold har fået opvarmning endnu.</p>';
+    return;
+  }
+
+  // Tidsaksen går fra første hele time før den første opvarmning til
+  // første hele time efter den sidste.
+  const starts = placed.map((r) => toMinutes(r.opvarmningStart));
+  const ends = placed.map((r) => toMinutes(r.opvarmningSlut));
+  const from = Math.floor(Math.min(...starts) / 60) * 60;
+  const to = Math.ceil(Math.max(...ends) / 60) * 60;
+  const span = Math.max(to - from, 60);
+  const pct = (min) => ((min - from) / span) * 100;
+  const hourW = `${(60 / span) * 100}%`;
+
+  const axis = document.createElement("div");
+  axis.className = "tl-axis";
+  const axisTrack = document.createElement("div");
+  axisTrack.className = "tl-track";
+  for (let t = from; t <= to; t += 60) {
+    const tick = document.createElement("span");
+    tick.className = "tl-tick";
+    tick.style.left = `${pct(t)}%`;
+    tick.textContent = fmtMinutes(t).slice(0, 2);
+    axisTrack.appendChild(tick);
+  }
+  axis.append(document.createElement("span"), axisTrack);
+  el.appendChild(axis);
+
+  STATE.warmupHalls.forEach((hal) => {
+    const lane = document.createElement("div");
+    lane.className = "tl-lane";
+
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "tl-lane-name";
+    name.textContent = hal;
+    name.title = `Vis opvarmningen i ${hal}`;
+    name.addEventListener("click", () => { activeWarmupHal = hal; setView("opvarmning"); });
+
+    const track = document.createElement("div");
+    track.className = "tl-track";
+    track.style.setProperty("--hour-w", hourW);
+    track.style.setProperty("--hour-offset", "0");
+
+    placed.filter((r) => r.opvarmningHalBeregnet === hal).forEach((r) => {
+      const s = toMinutes(r.opvarmningStart);
+      const e = toMinutes(r.opvarmningSlut);
+      const block = document.createElement("button");
+      block.type = "button";
+      block.className = "tl-block" + (r.opvarmningStartOverride ? " pinned" : "");
+      block.style.left = `${pct(s)}%`;
+      block.style.width = `${pct(e) - pct(s)}%`;
+      block.style.setProperty("--c", halColor(r.opvisningHal));
+      block.title = `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`;
+      block.setAttribute("aria-label", `${r.hold}, opvarmning ${r.opvarmningStart} til ${r.opvarmningSlut}`);
+      block.addEventListener("click", () => { activeWarmupHal = hal; setView("opvarmning"); });
+      track.appendChild(block);
+    });
+
+    lane.append(name, track);
+    el.appendChild(lane);
+  });
+
+  STATE.showHalls.forEach((h) => {
+    const item = document.createElement("span");
+    item.className = "legend-item";
+    const sw = document.createElement("span");
+    sw.className = "legend-swatch";
+    sw.style.setProperty("--c", halColor(h.name));
+    item.append(sw, document.createTextNode(h.name));
+    legend.appendChild(item);
+  });
+}
+
+function renderShowHallSummary() {
+  const list = document.getElementById("show-hall-summary");
+  list.replaceChildren();
+  STATE.showHalls.forEach((hal) => {
+    const rows = STATE.rows.filter((r) => r.opvisningHal === hal.name).sort((a, b) => a.order - b.order);
+    const teams = rows.filter((r) => r.needsWarmup);
+    const problems = teams.filter((r) => r.problemMessage).length;
+    const last = rows[rows.length - 1];
+    const end = last && last.opvisningTid ? fmtMinutes(toMinutes(last.opvisningTid) + last.varighed) : null;
+
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hall-row";
+    btn.addEventListener("click", () => { activeHal = hal.name; saveActiveHal(); setView("program"); });
+
+    const dot = document.createElement("span");
+    dot.className = "hall-row-dot";
+    dot.style.setProperty("--c", halColor(hal.name));
+    const name = document.createElement("span");
+    name.className = "hall-row-name";
+    name.textContent = hal.name;
+    const time = document.createElement("span");
+    time.className = "hall-row-time";
+    time.textContent = end ? `${hal.startTime}–${end}` : hal.startTime;
+    const count = document.createElement("span");
+    count.className = problems ? "hall-row-problem" : "hall-row-count";
+    count.textContent = problems
+      ? `${problems} af ${plural(teams.length, "hold", "hold")} mangler opvarmning`
+      : plural(teams.length, "hold", "hold");
+    const open = document.createElement("span");
+    open.className = "hall-row-open";
+    open.textContent = "Åbn program";
+
+    btn.append(dot, name, time, count, open);
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
 }
 
 function renderHalls() {
@@ -329,51 +581,6 @@ function renderHalls() {
   });
 }
 
-function renderSchedule() {
-  document.querySelectorAll(".mode-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.mode === scheduleMode);
-  });
-
-  const warmupTabs = document.getElementById("warmup-hal-tabs");
-  if (scheduleMode === "opvarmning") {
-    warmupTabs.classList.remove("hidden");
-    renderWarmupHalTabs();
-    renderWarmupSchedule();
-  } else {
-    warmupTabs.classList.add("hidden");
-    renderOpvisningSchedule();
-  }
-}
-
-function renderOpvisningSchedule() {
-  const el = document.getElementById("schedule-list");
-  el.innerHTML = "";
-
-  if (!activeHal) {
-    el.innerHTML = '<div class="schedule-empty">Vælg en opvisningshal for at se dens tidsplan.</div>';
-    return;
-  }
-
-  const items = STATE.schedule.filter((item) => item.opvisningHal === activeHal);
-  if (!items.length) {
-    el.innerHTML = '<div class="schedule-empty">Ingen programpunkter i denne hal endnu.</div>';
-    return;
-  }
-  items.forEach((item) => {
-    const div = document.createElement("div");
-    div.className = "schedule-item" + (!item.needsWarmup ? " schedule-special" : "");
-    const tid = document.createElement("span");
-    tid.className = "tid";
-    tid.textContent = item.tid;
-    const hold = document.createElement("span");
-    hold.className = "hold";
-    hold.textContent = item.hold;
-    hold.title = item.hold;
-    div.append(tid, hold);
-    el.appendChild(div);
-  });
-}
-
 function renderWarmupHalTabs() {
   const el = document.getElementById("warmup-hal-tabs");
   el.innerHTML = "";
@@ -386,9 +593,7 @@ function renderWarmupHalTabs() {
     );
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "nav-link d-inline-flex align-items-center gap-1"
-      + (name === activeWarmupHal ? " active" : "")
-      + (hasProblem ? " nav-link-danger" : "");
+    btn.className = "tab" + (name === activeWarmupHal ? " active" : "") + (hasProblem ? " has-problem" : "");
     if (hasProblem) btn.appendChild(icon("warning"));
     btn.appendChild(document.createTextNode(name));
     if (hasProblem) btn.title = "Et hold der er låst til denne hal kan ikke få plads";
@@ -396,50 +601,6 @@ function renderWarmupHalTabs() {
     makeDropTarget(btn, (draggedId) => patchRow(draggedId, "opvarmningHal", name));
     el.appendChild(btn);
   });
-}
-
-function renderWarmupSchedule() {
-  const el = document.getElementById("schedule-list");
-  el.innerHTML = "";
-
-  const unplaced = STATE.rows.filter((r) => r.needsWarmup && r.problemMessage);
-  if (unplaced.length) {
-    const heading = document.createElement("div");
-    heading.className = "schedule-subheading schedule-subheading-danger";
-    heading.textContent = `Ikke placeret (${unplaced.length})`;
-    el.appendChild(heading);
-    unplaced.forEach((row) => {
-      const div = document.createElement("div");
-      div.className = "schedule-item schedule-danger";
-      div.title = row.problemMessage;
-      div.addEventListener("click", () => jumpToRow(row.opvisningHal));
-      const tid = document.createElement("span");
-      tid.className = "tid";
-      tid.appendChild(icon("warning"));
-      const hold = document.createElement("span");
-      hold.className = "hold";
-      hold.textContent = row.hold;
-      hold.title = row.hold;
-      const hal = document.createElement("span");
-      hal.className = "hal";
-      hal.textContent = row.opvisningHal;
-      div.append(tid, hold, hal);
-      el.appendChild(div);
-    });
-  }
-
-  if (!STATE.warmupHalls.length) {
-    const empty = document.createElement("div");
-    empty.className = "schedule-empty";
-    empty.textContent = "Ingen opvarmningshaller oprettet endnu.";
-    el.appendChild(empty);
-    return;
-  }
-
-  const hint = document.createElement("div");
-  hint.className = "schedule-empty";
-  hint.textContent = "Vælg en hal ovenfor for at se og rette dens opvarmningstider i listen til højre.";
-  el.appendChild(hint);
 }
 
 // Den redigerbare visning for én specifik opvarmningshal: viser hvilke hold
@@ -501,9 +662,6 @@ function renderUnplacedWarmup() {
     const unpinUnplaced = buildUnpinButton(row);
     if (unpinUnplaced) holdText.appendChild(unpinUnplaced);
     tdHold.appendChild(holdText);
-    if (row.problemMessage) {
-      tdHold.appendChild(warningMessage(row.problemMessage));
-    }
     tr.appendChild(tdHold);
 
     tr.appendChild(readonlyCell(row.opvisningHal));
@@ -527,21 +685,18 @@ function renderWarmupTable() {
   const table = document.getElementById("warmup-table");
   const emptyState = document.getElementById("warmup-empty-state");
   const noHalState = document.getElementById("warmup-no-hal-state");
-  const title = document.getElementById("warmup-view-title");
 
   if (!activeWarmupHal || !STATE.warmupHalls.includes(activeWarmupHal)) {
     activeWarmupHal = STATE.warmupHalls.length ? STATE.warmupHalls[0] : null;
   }
 
   if (!activeWarmupHal) {
-    title.textContent = "";
     table.classList.add("hidden");
     emptyState.classList.add("hidden");
     noHalState.classList.remove("hidden");
     return;
   }
   noHalState.classList.add("hidden");
-  title.textContent = activeWarmupHal;
 
   const rows = STATE.rows
     .filter((r) => r.needsWarmup && r.status === "OK" && r.opvarmningHalBeregnet === activeWarmupHal)
@@ -600,9 +755,7 @@ function renderHalTabs() {
     const hasProblem = STATE.rows.some((r) => r.opvisningHal === hal.name && r.problemMessage);
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "nav-link d-inline-flex align-items-center gap-1"
-      + (hal.name === activeHal ? " active" : "")
-      + (hasProblem ? " nav-link-danger" : "");
+    btn.className = "tab" + (hal.name === activeHal ? " active" : "") + (hasProblem ? " has-problem" : "");
     if (hasProblem) btn.appendChild(icon("warning"));
     btn.appendChild(document.createTextNode(hal.name));
     if (hasProblem) btn.title = "Der er hold i denne hal der ikke kan placeres";
