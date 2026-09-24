@@ -15,3 +15,7 @@ opvisning_med_opvarmning.xlsx
 
 # Excel-filer (hold- og programdata) holdes lokalt
 *.xlsx
+
+# Genereret browserudgave og downloads til den
+site/
+webapp/.build-cache/

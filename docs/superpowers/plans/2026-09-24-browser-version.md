@@ -1683,7 +1683,7 @@ def run():
           sorted(names))
     check("planner.zip has no tests or caches", not any("test_" in n or "__pycache__" in n for n in names))
 
-    for f in ["pyodide.js", "pyodide.asm.wasm", "pyodide.asm.js", "python_stdlib.zip", "pyodide-lock.json"]:
+    for f in ["pyodide.js", "pyodide.asm.wasm", "pyodide.asm.mjs", "python_stdlib.zip", "pyodide-lock.json"]:
         check(f"pyodide/{f} present", (out / "pyodide" / f).is_file())
     lock = json.loads((out / "pyodide" / "pyodide-lock.json").read_text(encoding="utf-8"))
     for pkg in ["pandas", "numpy", "python-dateutil", "pytz", "six"]:
