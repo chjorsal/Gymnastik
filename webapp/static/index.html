@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=37">
+<link rel="stylesheet" href="style.css?v=38">
 </head>
 <body>
 <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -267,6 +267,17 @@
       </form>
     </div>
 
+    <div id="data-section" class="hall-group data-section hidden">
+      <h3 class="hall-group-title">Om data</h3>
+      <p class="hall-group-text">Dine data gemmes kun i denne browser. De sendes ikke til nogen server. Skriv ikke personnavne i Excel-filen.</p>
+      <div class="data-actions">
+        <button id="btn-save-plan" type="button" class="btn btn-sm btn-outline-secondary">Gem plan</button>
+        <button id="btn-open-plan" type="button" class="btn btn-sm btn-outline-secondary">Åbn plan</button>
+        <input type="file" id="plan-file-input" accept=".json,application/json" class="visually-hidden" tabindex="-1">
+        <button id="btn-clear-data" type="button" class="btn btn-sm btn-outline-danger">Slet alle data</button>
+      </div>
+    </div>
+
     <div class="hall-group danger-zone">
       <h3 class="hall-group-title">Start forfra</h3>
       <p class="hall-group-text">Fjerner alle hold og programpunkter. Hallerne bevares.</p>
@@ -277,7 +288,7 @@
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
-<script src="api.js?v=2"></script>
-<script src="app.js?v=39"></script>
+<script src="api.js?v=3"></script>
+<script src="app.js?v=40"></script>
 </body>
 </html>

@@ -166,6 +166,18 @@ async function init() {
   document.querySelectorAll(".add-special").forEach((btn) => {
     btn.addEventListener("click", () => onAddSpecial(btn.dataset.type));
   });
+  if (Api.mode === "browser") {
+    document.getElementById("data-section").classList.remove("hidden");
+    const planInput = document.getElementById("plan-file-input");
+    document.getElementById("btn-save-plan").addEventListener("click", () => handle(Api.savePlanFile()));
+    document.getElementById("btn-open-plan").addEventListener("click", () => planInput.click());
+    planInput.addEventListener("change", () => onOpenPlan(planInput));
+    document.getElementById("btn-clear-data").addEventListener("click", () => {
+      if (!confirm("Slet planen og alle haller fra denne browser? Det kan ikke fortrydes.")) return;
+      Api.clearAllData();
+      location.reload();
+    });
+  }
 }
 
 // Opretter en opvisningshal med starttid i ét trin (fra "Kom i gang").
@@ -216,6 +228,17 @@ function setupDropzone(zone) {
     zone.classList.remove("drag-over");
     uploadFiles(e.dataTransfer.files);
   });
+}
+
+async function onOpenPlan(input) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  if (STATE.rows.length && !confirm("Erstat den nuværende plan med planen fra filen?")) return;
+  STATE = await handle(Api.openPlanFile(await file.text()));
+  activeHal = STATE.showHalls.length ? STATE.showHalls[0].name : null;
+  saveActiveHal();
+  render();
 }
 
 async function onReset() {

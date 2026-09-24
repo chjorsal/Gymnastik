@@ -1922,6 +1922,7 @@ def browser_only(browser, context, page, url, dialogs):
     other.wait_for_function(f"() => STATE.rows.length === {rows + 1}", timeout=10_000)
     check("ændring i én fane vises i den anden", other.evaluate("() => STATE.rows.length") == rows + 1)
     other.close()
+    page.wait_for_function(f"() => STATE.rows.length === {rows + 1}")  # egen gemning færdig
 
     page.evaluate("() => localStorage.setItem('opvarmning_plan_v1', '{ødelagt')")
     page.reload()

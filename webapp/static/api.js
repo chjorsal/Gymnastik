@@ -52,6 +52,9 @@ const Api = (() => {
       window.location.href = "/api/export.xlsx";
     },
     onExternalChange() {},
+    async savePlanFile() { throw new ApiError("Kun i browserudgaven.", 400); },
+    async openPlanFile() { throw new ApiError("Kun i browserudgaven.", 400); },
+    clearAllData() {},
   };
 
   // ---------- browser (Pyodide + localStorage) ----------
@@ -122,10 +125,12 @@ const Api = (() => {
     planJson = "";
   }
 
-  function answer(resJson) {
+  // save=false for rene læsninger: så skriver et besøg alene aldrig noget
+  // i browseren (fx lige efter "Slet alle data").
+  function answer(resJson, save = true) {
     const res = JSON.parse(resJson);
     if (!res.ok) throw new ApiError(res.error, res.status);
-    store(JSON.stringify(res.plan));
+    if (save) store(JSON.stringify(res.plan));
     return res.payload;
   }
 
@@ -166,7 +171,7 @@ const Api = (() => {
       const route = ROUTES.find(([m, re]) => m === method && re.test(url));
       if (!route) throw new ApiError(`Ukendt handling: ${method} ${url}`, 400);
       const [name, args] = route[2](url.match(route[1]), body || {});
-      return answer(bridge.call(planJson, name, JSON.stringify(args)));
+      return answer(bridge.call(planJson, name, JSON.stringify(args)), name !== "payload");
     },
     async upload(files, hal) {
       const paths = [];
@@ -187,6 +192,21 @@ const Api = (() => {
         "opvisning_med_opvarmning.xlsx");
     },
     onExternalChange(cb) { externalChange = cb; },
+    async savePlanFile() {
+      download(new Blob([planJson || JSON.stringify(JSON.parse(bridge.load("")).plan)], { type: "application/json" }),
+        "opvarmningsplan.json");
+    },
+    async openPlanFile(text) {
+      const res = JSON.parse(bridge.import_plan(text));
+      if (!res.ok) throw new ApiError(res.error, res.status);
+      store(JSON.stringify(res.plan));
+      return answer(bridge.call(planJson, "payload", "{}"));
+    },
+    clearAllData() {
+      try {
+        Object.keys(localStorage).filter((k) => k.startsWith("opvarmning_")).forEach((k) => localStorage.removeItem(k));
+      } catch (e) { /* intet gemt */ }
+    },
   };
 
   const transport = config.mode === "browser" ? browserT : server;
@@ -199,5 +219,8 @@ const Api = (() => {
     upload: (files, hal) => transport.upload(files, hal),
     exportPlan: () => transport.exportPlan(),
     onExternalChange: (cb) => transport.onExternalChange(cb),
+    savePlanFile: () => transport.savePlanFile(),
+    openPlanFile: (text) => transport.openPlanFile(text),
+    clearAllData: () => transport.clearAllData(),
   };
 })();

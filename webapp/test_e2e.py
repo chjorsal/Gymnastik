@@ -142,6 +142,7 @@ def browser_only(browser, context, page, url, dialogs):
     other.wait_for_function(f"() => STATE.rows.length === {rows + 1}", timeout=10_000)
     check("ændring i én fane vises i den anden", other.evaluate("() => STATE.rows.length") == rows + 1)
     other.close()
+    page.wait_for_function(f"() => STATE.rows.length === {rows + 1}")  # egen gemning færdig
 
     page.evaluate("() => localStorage.setItem('opvarmning_plan_v1', '{ødelagt')")
     page.reload()
@@ -174,6 +175,42 @@ def browser_only(browser, context, page, url, dialogs):
     check("Pyodide der ikke kan hentes giver dansk fejl", True)
     offline.close()
 
+    # ---------- data-sektionen ----------
+    page.goto(url)
+    page.wait_for_selector("#boot.hidden", state="attached", timeout=120_000)
+    page.click("#btn-halls")
+    page.wait_for_selector("#halls-panel.show")
+    check("Om data-teksten vises",
+          "Dine data gemmes kun i denne browser. De sendes ikke til nogen server. Skriv ikke personnavne i Excel-filen."
+          in page.inner_text("#data-section"))
+    page.fill("#warmup-hall-form input", "Varm X")
+    page.press("#warmup-hall-form input", "Enter")
+    page.wait_for_function("() => STATE.warmupHalls.includes('Varm X')")
+
+    with page.expect_download() as dl:
+        page.click("#btn-save-plan")
+    check("Gem plan henter opvarmningsplan.json", dl.value.suggested_filename == "opvarmningsplan.json")
+    saved = Path(dl.value.path())
+
+    bad = saved.with_name("forkert.json")
+    bad.write_text('{"raw_rows": "nej"}', encoding="utf-8")
+    before = page.evaluate("() => JSON.stringify(STATE.warmupHalls)")
+    page.set_input_files("#plan-file-input", str(bad))
+    page.wait_for_timeout(500)
+    check("Åbn plan med ugyldig fil giver besked og ændrer intet",
+          any("ikke en gyldig plan" in d for d in dialogs) and page.evaluate("() => JSON.stringify(STATE.warmupHalls)") == before)
+
+    page.click("#btn-clear-data")   # bekræftelsen accepteres af dialog-handleren
+    page.wait_for_selector("#onboarding:not(.hidden)", timeout=120_000)
+    left = page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('opvarmning_'))")
+    check("Slet alle data fjerner alt og viser 'Kom i gang'", left == [] and page.evaluate("() => STATE.warmupHalls.length") == 0, left)
+
+    page.click("#btn-halls")
+    page.wait_for_selector("#halls-panel.show")
+    page.set_input_files("#plan-file-input", str(saved))
+    page.wait_for_function("() => STATE.warmupHalls.includes('Varm X')", timeout=10_000)
+    check("Åbn plan indlæser en gemt plan", True)
+
 
 def run(mode):
     tmp = tempfile.mkdtemp()
@@ -202,6 +239,8 @@ def run(mode):
             page.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
             page.on("pageerror", lambda e: errors.append(str(e)))
             common_flow(page, url, xlsx, dialogs, errors)
+            if mode == "server":
+                check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))
             check("ingen JavaScript-fejl", not errors, errors)
             if mode == "browser":
                 browser_only(browser, context, page, url, dialogs)

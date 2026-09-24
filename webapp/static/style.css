@@ -333,6 +333,8 @@ tr.table-danger > td { background: var(--signal-soft) !important; }
 .boot.failed .boot-text { color: var(--signal); }
 .boot.failed .boot-hint { display: none; }
 
+.data-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
