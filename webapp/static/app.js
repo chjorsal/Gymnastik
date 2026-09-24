@@ -140,6 +140,11 @@ async function init() {
     btn.addEventListener("click", () => setView(btn.dataset.view));
   });
   document.getElementById("btn-reset").addEventListener("click", onReset);
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (currentView === "oversigt") render(); }, 150);
+  });
   document.getElementById("warmup-hall-form").addEventListener("submit", (e) => onHallCreate(e, "warmup"));
   document.getElementById("show-hall-form").addEventListener("submit", (e) => onHallCreate(e, "show"));
 
@@ -452,6 +457,8 @@ function renderProblemBanner() {
   banner.onclick = () => setView("opvarmning");
 }
 
+const TL_LABEL_W = 110;   // bredde på hal-navnene til venstre (px)
+
 function renderTimeline(teams) {
   const el = document.getElementById("timeline");
   const legend = document.getElementById("timeline-legend");
@@ -459,20 +466,42 @@ function renderTimeline(teams) {
   legend.replaceChildren();
 
   const placed = teams.filter((r) => r.status === "OK" && r.opvarmningStart);
-  if (!placed.length || !STATE.warmupHalls.length) {
+  // Hold uden plads vises i en rød række, hvor opvarmningen skulle have ligget:
+  // lige op til holdets opvisning.
+  const missing = teams
+    .filter((r) => r.problemMessage && r.opvisningTid)
+    .map((r) => {
+      const warm = r.opvarmningMinOverride ?? r.opvarmningMinDefault;
+      const end = toMinutes(r.opvisningTid);
+      return { row: r, start: end - warm, end };
+    });
+
+  if (!STATE.warmupHalls.length || (!placed.length && !missing.length)) {
     el.innerHTML = '<p class="text-body-secondary mb-0">Ingen hold har fået opvarmning endnu.</p>';
     return;
   }
 
-  // Tidsaksen går fra første hele time før den første opvarmning til
-  // første hele time efter den sidste.
-  const starts = placed.map((r) => toMinutes(r.opvarmningStart));
-  const ends = placed.map((r) => toMinutes(r.opvarmningSlut));
+  // Tidsaksen går fra hel time før første opvarmning til hel time efter sidste.
+  const starts = placed.map((r) => toMinutes(r.opvarmningStart)).concat(missing.map((m) => m.start));
+  const ends = placed.map((r) => toMinutes(r.opvarmningSlut)).concat(missing.map((m) => m.end));
   const from = Math.floor(Math.min(...starts) / 60) * 60;
   const to = Math.ceil(Math.max(...ends) / 60) * 60;
   const span = Math.max(to - from, 60);
-  const pct = (min) => ((min - from) / span) * 100;
-  const hourW = `${(60 / span) * 100}%`;
+
+  // Hele pixels i stedet for procenter, så kanter og linjer står skarpt.
+  const trackW = Math.max(el.clientWidth - TL_LABEL_W, 600);
+  const px = (min) => Math.round(((min - from) / span) * trackW);
+
+  const gridLines = () => {
+    const frag = document.createDocumentFragment();
+    for (let t = from; t <= to; t += 60) {
+      const line = document.createElement("span");
+      line.className = "tl-hour";
+      line.style.left = `${px(t)}px`;
+      frag.appendChild(line);
+    }
+    return frag;
+  };
 
   const axis = document.createElement("div");
   axis.className = "tl-axis";
@@ -481,47 +510,70 @@ function renderTimeline(teams) {
   for (let t = from; t <= to; t += 60) {
     const tick = document.createElement("span");
     tick.className = "tl-tick";
-    tick.style.left = `${pct(t)}%`;
-    tick.textContent = fmtMinutes(t).slice(0, 2);
+    tick.style.left = `${px(t)}px`;
+    tick.textContent = fmtMinutes(t);
     axisTrack.appendChild(tick);
   }
   axis.append(document.createElement("span"), axisTrack);
   el.appendChild(axis);
 
-  STATE.warmupHalls.forEach((hal) => {
-    const lane = document.createElement("div");
-    lane.className = "tl-lane";
+  const addBlock = (track, { start, end, color, extraClass, title, onClick }) => {
+    const left = px(start);
+    const block = document.createElement("button");
+    block.type = "button";
+    block.className = "tl-block" + (extraClass ? ` ${extraClass}` : "");
+    block.style.left = `${left}px`;
+    block.style.width = `${Math.max(px(end) - left - 1, 3)}px`;  // 1px luft mellem blokke
+    if (color) block.style.setProperty("--c", color);
+    block.title = title;
+    block.setAttribute("aria-label", title.replaceAll("\n", ", "));
+    block.addEventListener("click", onClick);
+    track.appendChild(block);
+  };
 
+  const lane = (label, onLabelClick, extraClass) => {
+    const row = document.createElement("div");
+    row.className = "tl-lane" + (extraClass ? ` ${extraClass}` : "");
     const name = document.createElement("button");
     name.type = "button";
     name.className = "tl-lane-name";
-    name.textContent = hal;
-    name.title = `Vis opvarmningen i ${hal}`;
-    name.addEventListener("click", () => { activeWarmupHal = hal; setView("opvarmning"); });
-
+    name.textContent = label;
+    name.addEventListener("click", onLabelClick);
     const track = document.createElement("div");
     track.className = "tl-track";
-    track.style.setProperty("--hour-w", hourW);
-    track.style.setProperty("--hour-offset", "0");
+    track.appendChild(gridLines());
+    row.append(name, track);
+    el.appendChild(row);
+    return track;
+  };
 
+  STATE.warmupHalls.forEach((hal) => {
+    const open = () => { activeWarmupHal = hal; setView("opvarmning"); };
+    const track = lane(hal, open);
     placed.filter((r) => r.opvarmningHalBeregnet === hal).forEach((r) => {
-      const s = toMinutes(r.opvarmningStart);
-      const e = toMinutes(r.opvarmningSlut);
-      const block = document.createElement("button");
-      block.type = "button";
-      block.className = "tl-block" + (r.opvarmningStartOverride ? " pinned" : "");
-      block.style.left = `${pct(s)}%`;
-      block.style.width = `${pct(e) - pct(s)}%`;
-      block.style.setProperty("--c", halColor(r.opvisningHal));
-      block.title = `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`;
-      block.setAttribute("aria-label", `${r.hold}, opvarmning ${r.opvarmningStart} til ${r.opvarmningSlut}`);
-      block.addEventListener("click", () => { activeWarmupHal = hal; setView("opvarmning"); });
-      track.appendChild(block);
+      addBlock(track, {
+        start: toMinutes(r.opvarmningStart),
+        end: toMinutes(r.opvarmningSlut),
+        color: halColor(r.opvisningHal),
+        extraClass: r.opvarmningStartOverride ? "pinned" : "",
+        title: `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`,
+        onClick: open,
+      });
     });
-
-    lane.append(name, track);
-    el.appendChild(lane);
   });
+
+  if (missing.length) {
+    const open = () => setView("opvarmning");
+    const track = lane("Mangler plads", open, "tl-lane-problem");
+    missing.forEach(({ row: r, start, end }) => {
+      addBlock(track, {
+        start, end,
+        extraClass: "problem",
+        title: `${r.hold}\nMangler plads til opvarmning\nGår på ${r.opvisningTid} i ${r.opvisningHal}`,
+        onClick: open,
+      });
+    });
+  }
 
   STATE.showHalls.forEach((h) => {
     const item = document.createElement("span");
