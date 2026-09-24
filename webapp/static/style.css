@@ -1,0 +1,195 @@
+/* Tema-lag oven på Bootstrap (vendor/bootstrap.min.css) — kun det app-specifikke:
+   brand-mark, ikoner, drag/opvarmning-tilstande og layout Bootstrap ikke selv dækker. */
+
+:root {
+  --accent: #3b5cf5;
+  --accent-2: #7b5cff;
+  --bs-body-bg: #f2f4f8;
+  --bs-border-radius: 0.6rem;
+  --bs-border-radius-sm: 0.45rem;
+  --bs-border-radius-lg: 0.75rem;
+  --bs-offcanvas-width: 380px;
+  font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+body { font-size: 14px; }
+
+.hidden { display: none !important; }
+
+/* ---------- Ikoner ---------- */
+
+.icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
+.icon svg { width: 14px; height: 14px; display: block; }
+
+.inline-icon { vertical-align: -2px; margin: 0 1px; color: var(--bs-secondary-color); }
+.plus-icon { flex-shrink: 0; }
+
+.with-drag-icon { display: inline-flex; align-items: center; gap: 6px; }
+.with-drag-icon .icon { color: var(--bs-secondary-color); }
+
+/* Lille rund ikon-knap (stjerne/slet) genbrugt i haller-listen og tabelrækker */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--bs-secondary-color);
+  padding: 5px;
+  border-radius: 999px;
+  border: none;
+  background: none;
+  line-height: 0;
+  transition: color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+}
+.icon-btn svg { width: 13px; height: 13px; }
+.icon-btn:hover { background: var(--bs-tertiary-bg); }
+.icon-btn-danger:hover { color: var(--bs-danger); background: var(--bs-danger-bg-subtle); }
+
+.star.active { color: #e0a800; }
+.star:hover { color: #e0a800; transform: scale(1.1); }
+
+/* ---------- Brand ---------- */
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+  box-shadow: 0 2px 8px rgba(59, 92, 245, 0.35);
+  flex-shrink: 0;
+}
+
+/* ---------- Layout ---------- */
+
+.schedule-panel-card {
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
+/* ---------- Segmented mode-toggle ---------- */
+
+#schedule-mode .btn { flex: 1 1 0; }
+
+/* ---------- Nav-pills (hal-faner) ---------- */
+
+#hal-tabs .nav-link,
+#warmup-hal-tabs .nav-link {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+}
+#warmup-hal-tabs .nav-link { font-size: 11px; padding: 4px 11px; }
+#hal-tabs .nav-link:hover:not(.active),
+#warmup-hal-tabs .nav-link:hover:not(.active) { background: var(--bs-secondary-bg); }
+
+.nav-link-danger { background: var(--bs-danger) !important; color: white !important; }
+.nav-link-danger.active { background: #b32424 !important; }
+
+.nav-link.drag-over { outline: 2px dashed var(--accent); outline-offset: 2px; }
+
+/* ---------- Haller-panel (offcanvas) ---------- */
+
+.hall-group .list-group-item { background: transparent; }
+.list-group-item input.form-control:focus { background: var(--bs-body-bg); box-shadow: none; }
+.hall-time-input { flex: 0 0 84px !important; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* ---------- Hal-toolbar (start-tid + hurtig-tilføj) ---------- */
+
+.hal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bs-tertiary-bg);
+  border-radius: var(--bs-border-radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.start-time-input { width: 84px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* ---------- Tidsplan (venstre panel) ---------- */
+
+.schedule-list { display: flex; flex-direction: column; gap: 4px; }
+.schedule-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.schedule-item:hover { background: var(--bs-tertiary-bg); }
+.schedule-item.schedule-special { font-style: italic; color: var(--bs-secondary-color); }
+.schedule-item.schedule-danger, .schedule-item.schedule-danger:hover {
+  background: var(--bs-danger-bg-subtle);
+  color: var(--bs-danger-text-emphasis);
+  font-weight: 600;
+}
+.schedule-item .tid {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+}
+.schedule-item.schedule-danger .tid { color: var(--bs-danger); }
+.schedule-item .tid .icon svg { width: 13px; height: 13px; }
+.schedule-item .hold { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-item .hal { color: var(--bs-secondary-color); font-size: 11px; }
+.schedule-subheading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color);
+  margin: 6px 0 3px;
+}
+.schedule-subheading-danger { color: var(--bs-danger); }
+.schedule-empty { color: var(--bs-secondary-color); font-size: 12px; padding: 4px 2px; }
+
+/* ---------- Tabeller ---------- */
+
+th.drag-col, td.drag-col { width: 24px; text-align: center; color: var(--bs-border-color); cursor: grab; }
+td.drag-col .icon { justify-content: center; width: 100%; }
+td.drag-col:hover { color: var(--bs-secondary-color); }
+th.narrow-col, td.narrow-col { width: 120px; }
+th.action-col, td.action-col { width: 32px; }
+td.hold-col { white-space: normal; max-width: 280px; }
+.hold-name-readonly { display: inline-block; padding: 3px 4px; font-weight: 500; }
+
+.cell-input { min-width: 70px; font-variant-numeric: tabular-nums; }
+td.narrow-col .cell-input { min-width: 56px; }
+td.readonly { color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+
+tr.dragging { opacity: 0.4; }
+tr.drag-over { background: var(--bs-primary-bg-subtle) !important; }
+tbody tr.row-special { font-style: italic; color: var(--bs-secondary-color); }
+tbody tr.row-special .cell-input.special-label { font-style: italic; color: var(--bs-secondary-color); }
+
+.unplaced-warmup-section tbody tr { cursor: grab; }
+#warmup-table-body tr { cursor: grab; }
+
+.warmup-view-title { }
+.unplaced-warmup-title svg { flex-shrink: 0; }
+
+/* ---------- Scrollbar (kosmetisk) ---------- */
+
+.schedule-panel-card::-webkit-scrollbar,
+.table-responsive::-webkit-scrollbar { height: 8px; width: 8px; }
+.schedule-panel-card::-webkit-scrollbar-thumb,
+.table-responsive::-webkit-scrollbar-thumb { background: var(--bs-border-color); border-radius: 8px; }
+.schedule-panel-card::-webkit-scrollbar-track,
+.table-responsive::-webkit-scrollbar-track { background: transparent; }

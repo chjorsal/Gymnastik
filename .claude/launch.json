@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "opvarmning-webapp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["webapp/app.py"],
+      "port": 8877
+    }
+  ]
+}

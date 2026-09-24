@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Lokale data der ændres under brug
+webapp/state.json
+webapp/state.tmp
+webapp/state.broken-*.json
+
+# Genereret output
+opvisning_med_opvarmning.xlsx
+
+# Lokale Claude-indstillinger
+.claude/settings.local.json
