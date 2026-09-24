@@ -49,24 +49,22 @@ function warningMessage(text) {
 
 // ---------- API ----------
 
-// Alle kald returnerer den nye state. Ved en fejl vises serverens besked,
-// og den nuværende STATE returneres uændret — så et "STATE = await ..."
-// aldrig overskriver state med et {error}-svar.
-async function readState(res) {
-  const data = await res.json().catch(() => ({}));
-  if (res.ok) return data;
-  alert(data.error || `Noget gik galt (fejl ${res.status}).`);
-  return STATE;
+// Alle kald returnerer den nye state. Ved en fejl vises beskeden, og den
+// nuværende STATE returneres uændret — så et "STATE = await ..." aldrig
+// overskriver state med et fejlsvar.
+async function handle(promise) {
+  try {
+    return await promise;
+  } catch (e) {
+    alert(e instanceof ApiError ? e.message : `Noget gik galt: ${e.message || e}`);
+    return STATE;
+  }
 }
 async function apiGet(url) {
-  return readState(await fetch(url));
+  return handle(Api.request("GET", url));
 }
 async function apiJSON(url, method, body) {
-  return readState(await fetch(url, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }));
+  return handle(Api.request(method, url, body));
 }
 
 // ---------- Genbrugte UI-hjælpere ----------
@@ -119,6 +117,8 @@ function readonlyCell(text, extraClass) {
 // ---------- Init ----------
 
 async function init() {
+  await Api.start(() => {});
+  document.getElementById("btn-export").addEventListener("click", () => handle(Api.exportPlan()));
   // En adresse som .../#program åbner direkte på den visning.
   const fromHash = location.hash.slice(1);
   if (VIEWS.includes(fromHash)) currentView = fromHash;
@@ -182,10 +182,7 @@ async function uploadFiles(files) {
     if (files && files.length) alert("Kun Excel-filer (.xlsx) kan indlæses.");
     return;
   }
-  const fd = new FormData();
-  xlsx.forEach((f) => fd.append("files", f));
-  if (hal) fd.append("show_hal", hal);
-  STATE = await readState(await fetch("/api/upload", { method: "POST", body: fd }));
+  STATE = await handle(Api.upload(xlsx, hal));
   input.value = "";
   if (!activeHal && STATE.showHalls.length) {
     activeHal = STATE.showHalls[STATE.showHalls.length - 1].name;

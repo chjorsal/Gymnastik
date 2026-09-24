@@ -1206,10 +1206,10 @@ def common_flow(page, url, xlsx, dialogs, errors):
     check("tom plan viser 'Kom i gang'", page.inner_text("#page-title") == "Kom i gang")
     check("Hent Excel-plan er skjult uden hold", page.is_hidden("#btn-export"))
 
-    for name in ["Varm 1", "Varm 2"]:
+    for i, name in enumerate(["Varm 1", "Varm 2"], start=1):
         page.fill("#onb-warmup-form input", name)
         page.press("#onb-warmup-form input", "Enter")
-    page.wait_for_function("document.querySelectorAll('#onb-warmup-list li').length === 2")
+        page.wait_for_function(f"document.querySelectorAll('#onb-warmup-list li').length === {i}")
     for i, (name, start) in enumerate([("Sal A", "9.15"), ("Sal B", "10:00")], start=1):
         page.fill("#onb-show-form input >> nth=0", name)
         page.fill("#onb-show-form input >> nth=1", start)
