@@ -205,6 +205,55 @@ def run():
     check("import_plan rejects invalid JSON", raises(lambda: actions.import_plan("{ikke json"), 400) is not None)
     check("import_plan round-trips a plan", actions.import_plan(json.dumps(plan)) == plan)
 
+    # ---------- browser-bro (planner.browser) ----------
+    import os
+    import tempfile
+
+    from planner import browser
+
+    res = json.loads(browser.load(""))
+    check("bridge load('') gives an empty plan", res["ok"] and res["plan"] == actions.new_plan())
+    res = json.loads(browser.load('{"show_halls": ["Gammel"]}'))
+    check("bridge load migrates an old plan", res["ok"] and res["plan"]["show_halls"][0]["name"] == "Gammel")
+    check("bridge load reports broken JSON", json.loads(browser.load("{ødelagt"))["ok"] is False)
+    check("bridge load reports wrong shape", json.loads(browser.load("[1, 2]"))["ok"] is False)
+
+    res = json.loads(browser.call("", "create_warmup_hall", json.dumps({"name": "Varm 1"})))
+    check("bridge call runs an action and returns plan + payload",
+          res["ok"] and res["plan"]["warmup_halls"] == ["Varm 1"] and res["payload"]["warmupHalls"] == ["Varm 1"])
+    plan_json = json.dumps(res["plan"])
+    res = json.loads(browser.call(plan_json, "set_show_hall_start_time", json.dumps({"name": "X", "start_time": "abc"})))
+    check("bridge call returns ActionError as ok=false with status",
+          res == {"ok": False, "error": "'abc' er ikke et gyldigt klokkeslæt — skriv fx 09:30", "status": 400}, res)
+    res = json.loads(browser.call(plan_json, "__import__", "{}"))
+    check("bridge call refuses unknown action names", res["ok"] is False and res["status"] == 400)
+    res = json.loads(browser.call(plan_json, "payload", "{}"))
+    check("bridge call 'payload' returns view without changes", res["ok"] and res["plan"] == json.loads(plan_json))
+
+    tmpdir = tempfile.mkdtemp()
+    path = os.path.join(tmpdir, "dag.xlsx")
+    with open(path, "wb") as f:
+        f.write(excel_bytes([("Hold 1", 10)]))
+    res = json.loads(browser.call(plan_json, "create_show_hall", json.dumps({"name": "Sal A"})))
+    res = json.loads(browser.upload_files(json.dumps(res["plan"]), json.dumps([path]), "Sal A"))
+    check("bridge upload_files reads files from paths",
+          res["ok"] and [r["Hold"] for r in res["plan"]["raw_rows"]] == ["Hold 1"], res.get("error"))
+    bad = os.path.join(tmpdir, "skrald.xlsx")
+    with open(bad, "wb") as f:
+        f.write(b"nej")
+    res2 = json.loads(browser.upload_files(json.dumps(res["plan"]), json.dumps([bad]), ""))
+    check("bridge upload_files returns a Danish error for a bad file",
+          res2["ok"] is False and "skrald.xlsx" in res2["error"])
+
+    out = os.path.join(tmpdir, "ud.xlsx")
+    check("bridge export_to writes an xlsx",
+          json.loads(browser.export_to(json.dumps(res["plan"]), out))["ok"] and open(out, "rb").read(2) == b"PK")
+
+    res = json.loads(browser.import_plan("ikke json"))
+    check("bridge import_plan rejects bad file", res == {"ok": False, "error": "Filen er ikke en gyldig plan.", "status": 400})
+    res = json.loads(browser.import_plan(plan_json))
+    check("bridge import_plan accepts a saved plan", res["ok"] and res["plan"]["warmup_halls"] == ["Varm 1"])
+
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     return not FAIL
 
