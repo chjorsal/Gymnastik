@@ -7,6 +7,8 @@ let STATE = { warmupHalls: [], priorityHall: null, showHalls: [], rows: [], sche
 let activeHal = localStorage.getItem(ACTIVE_HAL_KEY) || null;
 // Siden åbner altid på oversigten.
 let currentView = "oversigt";
+// Opvisningshal som den næste valgte fil skal lægges i (null = navn fra filnavnet).
+let uploadTargetHal = null;
 let activeWarmupHal = localStorage.getItem(ACTIVE_WARMUP_HAL_KEY) || null;
 
 // ---------- Ikoner ----------
@@ -129,10 +131,15 @@ async function init() {
   render();
 
   const fileInput = document.getElementById("file-input");
-  fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
-  document.querySelectorAll("#btn-upload, .js-upload").forEach((btn) => {
-    btn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    uploadFiles(fileInput.files, uploadTargetHal);
+    uploadTargetHal = null;
   });
+  document.querySelectorAll("#btn-upload, .js-upload").forEach((btn) => {
+    btn.addEventListener("click", () => chooseFileFor(null));
+  });
+  document.getElementById("onb-warmup-form").addEventListener("submit", (e) => onHallCreate(e, "warmup"));
+  document.getElementById("onb-show-form").addEventListener("submit", onShowHallCreate);
   setupDropzone(document.getElementById("dropzone"));
   document.querySelectorAll(".rail-link[data-view]").forEach((btn) => {
     btn.addEventListener("click", () => setView(btn.dataset.view));
@@ -147,7 +154,29 @@ async function init() {
   });
 }
 
-async function uploadFiles(files) {
+function chooseFileFor(hal) {
+  uploadTargetHal = hal;
+  document.getElementById("file-input").click();
+}
+
+// Opretter en opvisningshal med starttid i ét trin (fra "Kom i gang").
+async function onShowHallCreate(e) {
+  e.preventDefault();
+  const [nameInput, timeInput] = e.target.querySelectorAll("input");
+  const name = nameInput.value.trim();
+  if (!name) return;
+  STATE = await apiJSON("/api/halls/show", "POST", { name });
+  if (timeInput.value.trim()) {
+    STATE = await apiJSON("/api/halls/show/starttime", "POST", { name, startTime: timeInput.value.trim() });
+  }
+  nameInput.value = "";
+  timeInput.value = "";
+  if (!activeHal) { activeHal = name; saveActiveHal(); }
+  render();
+  nameInput.focus();
+}
+
+async function uploadFiles(files, hal = null) {
   const input = document.getElementById("file-input");
   const xlsx = Array.from(files || []).filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
   if (!xlsx.length) {
@@ -156,6 +185,7 @@ async function uploadFiles(files) {
   }
   const fd = new FormData();
   xlsx.forEach((f) => fd.append("files", f));
+  if (hal) fd.append("show_hal", hal);
   STATE = await readState(await fetch("/api/upload", { method: "POST", body: fd }));
   input.value = "";
   if (!activeHal && STATE.showHalls.length) {
@@ -298,7 +328,7 @@ function renderPageHead() {
   if (currentView === "oversigt") {
     if (!teams) {
       title.textContent = "Kom i gang";
-      sub.textContent = "Lav en opvarmningsplan til dagens opvisninger i tre trin.";
+      sub.textContent = "Lav en opvarmningsplan til dagens opvisninger i fire trin.";
     } else {
       title.textContent = "Oversigt";
       sub.textContent = `${plural(teams, "hold", "hold")} i ${plural(STATE.showHalls.length, "opvisningshal", "opvisningshaller")}, `
@@ -339,19 +369,84 @@ function renderOverview() {
   data.classList.toggle("hidden", teams.length === 0);
 
   if (!teams.length) {
-    const hallsDone = STATE.warmupHalls.length > 0;
-    document.getElementById("step-halls").classList.toggle("done", hallsDone);
-    document.getElementById("step-halls").classList.toggle("current", !hallsDone);
-    document.getElementById("step-upload").classList.toggle("current", hallsDone);
-    document.getElementById("step-halls-text").textContent = hallsDone
-      ? `Klar: ${STATE.warmupHalls.join(", ")}.`
-      : "Opret de haller, holdene kan varme op i.";
+    renderOnboarding();
     return;
   }
 
   renderProblemBanner();
   renderTimeline(teams);
   renderShowHallSummary();
+}
+
+function onbItem(nameText, metaText, actions) {
+  const li = document.createElement("li");
+  li.className = "onb-item";
+  const name = document.createElement("span");
+  name.className = "onb-item-name";
+  name.textContent = nameText;
+  li.appendChild(name);
+  if (metaText) {
+    const meta = document.createElement("span");
+    meta.className = "onb-item-meta";
+    meta.textContent = metaText;
+    li.appendChild(meta);
+  }
+  actions.forEach((a) => li.appendChild(a));
+  return li;
+}
+
+function removeButton(label, action) {
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "icon-btn icon-btn-danger";
+  del.title = label;
+  del.setAttribute("aria-label", label);
+  del.appendChild(icon("close"));
+  del.addEventListener("click", async () => { STATE = await action(); render(); });
+  return del;
+}
+
+function renderOnboarding() {
+  const hasWarmup = STATE.warmupHalls.length > 0;
+  const hasShow = STATE.showHalls.length > 0;
+  const steps = [
+    ["step-warmup", hasWarmup],
+    ["step-show", hasShow],
+    ["step-upload", false],
+  ];
+  const current = steps.find(([, done]) => !done);
+  steps.forEach(([id, done]) => {
+    const el = document.getElementById(id);
+    el.classList.toggle("done", done);
+    el.classList.toggle("current", current && current[0] === id);
+  });
+
+  const warmupList = document.getElementById("onb-warmup-list");
+  warmupList.replaceChildren(...STATE.warmupHalls.map((name) => {
+    const extra = [];
+    if (name === STATE.priorityHall && STATE.warmupHalls.length > 1) {
+      const prio = document.createElement("span");
+      prio.className = "prio";
+      prio.textContent = "Fyldes først";
+      extra.push(prio);
+    }
+    extra.push(removeButton(`Fjern ${name}`, () => apiJSON("/api/halls/warmup", "DELETE", { name })));
+    return onbItem(name, null, extra);
+  }));
+
+  const showList = document.getElementById("onb-show-list");
+  showList.replaceChildren(...STATE.showHalls.map((hal) => {
+    const upload = document.createElement("button");
+    upload.type = "button";
+    upload.className = "btn btn-sm btn-primary";
+    upload.textContent = "Vælg Excel";
+    upload.title = `Indlæs programmet for ${hal.name}`;
+    upload.addEventListener("click", () => chooseFileFor(hal.name));
+    return onbItem(hal.name, `start ${hal.startTime}`, [
+      upload,
+      removeButton(`Fjern ${hal.name}`, () => apiJSON("/api/halls/show", "DELETE", { name: hal.name })),
+    ]);
+  }));
 }
 
 function renderProblemBanner() {

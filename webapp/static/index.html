@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=32">
+<link rel="stylesheet" href="style.css?v=33">
 </head>
 <body>
 
@@ -68,24 +68,41 @@
 
       <div id="onboarding" class="onboarding hidden">
         <ol class="steps">
-          <li id="step-halls" class="step">
+          <li id="step-warmup" class="step">
             <span class="step-mark"></span>
-            <div>
-              <h2 class="step-title">Tjek opvarmningshallerne</h2>
-              <p id="step-halls-text" class="step-text"></p>
-              <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#halls-panel">Ret haller</button>
+            <div class="step-body">
+              <h2 class="step-title">Opvarmningshaller</h2>
+              <p class="step-text">Hallerne holdene kan varme op i. Den første bliver fyldt først.</p>
+              <ul id="onb-warmup-list" class="onb-list"></ul>
+              <form id="onb-warmup-form" class="add-form">
+                <input type="text" class="form-control form-control-sm" placeholder="Fx Hal 3 A" aria-label="Navn på opvarmningshal" required>
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Tilføj</button>
+              </form>
+            </div>
+          </li>
+          <li id="step-show" class="step">
+            <span class="step-mark"></span>
+            <div class="step-body">
+              <h2 class="step-title">Opvisningshaller</h2>
+              <p class="step-text">Hallerne hvor holdene optræder, og hvornår programmet starter.</p>
+              <ul id="onb-show-list" class="onb-list"></ul>
+              <form id="onb-show-form" class="add-form">
+                <input type="text" class="form-control form-control-sm" placeholder="Fx Arena" aria-label="Navn på opvisningshal" required>
+                <input type="text" class="form-control form-control-sm start-time-input" placeholder="09:00" aria-label="Starttid">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Tilføj</button>
+              </form>
             </div>
           </li>
           <li id="step-upload" class="step">
             <span class="step-mark"></span>
-            <div>
-              <h2 class="step-title">Indlæs dagens program</h2>
-              <p class="step-text">Én Excel-fil pr. opvisningshal, fra samme dag.</p>
+            <div class="step-body">
+              <h2 class="step-title">Indlæs programmet</h2>
+              <p class="step-text">Tryk på Vælg Excel ved hver opvisningshal, eller træk filerne ind i feltet. Filerne skal være fra samme dag.</p>
             </div>
           </li>
           <li class="step">
             <span class="step-mark"></span>
-            <div>
+            <div class="step-body">
               <h2 class="step-title">Tjek planen og hent den</h2>
               <p class="step-text">Opvarmningen fordeles automatisk. Ret det, der skal rettes, og hent planen som Excel.</p>
             </div>
@@ -250,6 +267,6 @@
 </div>
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
-<script src="app.js?v=32"></script>
+<script src="app.js?v=34"></script>
 </body>
 </html>

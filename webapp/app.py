@@ -26,8 +26,8 @@ BASE_DIR = Path(__file__).parent
 STATE_FILE = Path(os.environ.get("STATE_FILE", BASE_DIR / "state.json"))
 
 DEFAULT_STATE = {
-    "warmup_halls": ["Hal 3 A", "Hal 3 B", "Hal 4"],
-    "priority_hall": "Hal 4",
+    "warmup_halls": [],   # brugeren opretter selv sine haller
+    "priority_hall": None,
     "show_halls": [],   # [{"name": str, "startTime": "HH:MM"}]
     "raw_rows": [],
 }
@@ -200,8 +200,10 @@ async def upload(files: List[UploadFile] = File(...), show_hal: Optional[str] = 
                     "name": hal_name,
                     "startTime": suggested_start or "09:00",
                 })
-            elif suggested_start:
-                existing["startTime"] = suggested_start  # genbrugt tom hal: filens starttid gælder
+            elif suggested_start and not explicit_name:
+                # genbrugt tom hal fundet via filnavnet: filens starttid gælder.
+                # Har brugeren selv valgt hallen, beholdes brugerens starttid.
+                existing["startTime"] = suggested_start
         start_order = next_order(hal_name)
         for i, row in enumerate(rows):
             row["Order"] = start_order + i

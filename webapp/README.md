@@ -13,8 +13,8 @@ python app.py
 
 ## Brug
 
-1. Opret evt. dine opvarmningshaller under **Haller** (der er sat 3 standard
-   op i forvejen: Hal 3 A, Hal 3 B, Hal 4, med Hal 4 som prioritet).
+1. Opret dine opvarmningshaller og opvisningshaller på startsiden (eller
+   under **Haller**). Den første opvarmningshal bliver prioritetshal.
 2. Upload en eller flere Excel-filer med hold (kolonnerne `Tid`, `Varighed`,
    `Holdnavn`/`Forening`, `Antal deltagere`, evt. `Holdtype` og `Alder`).
    Hver fil bliver sin egen opvisningshal (fane øverst i listen), med et
