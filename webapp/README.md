@@ -41,7 +41,10 @@ at genstarte serveren.
 ## Kodestruktur
 
 ```
-app.py              webserver (FastAPI) og API
+app.py              webserver (FastAPI) — tynd skal om planner.actions
+planner/
+  actions.py        alle handlinger på en plan (upload, ret, flyt, haller, eksport)
+  browser.py        JSON-bro til browserudgaven (Pyodide)
 engine/             beregningsmotoren — bruges af både hjemmesiden og scriptet
   config.py         faste standardværdier og nøgleordslister
   rules.py          holdtype, alder, opvarmnings-/gangtid og prioritet
@@ -50,9 +53,33 @@ engine/             beregningsmotoren — bruges af både hjemmesiden og scripte
   placement.py      placeringsalgoritmen for opvarmning
   serialize.py      plan -> JSON til frontenden
   export.py         plan -> Excel-fil
-static/             frontend (HTML, CSS, JS)
+static/             frontend (HTML, CSS, JS); api.js vælger server eller browser
+build_site.py       bygger browserudgaven til ../site
+```
+
+## To udgaver
+
+- **Server** (`python app.py`): planen gemmes i `state.json`.
+- **Browser** (GitHub Pages): Python-motoren kører i browseren med Pyodide,
+  og planen gemmes i brugerens egen browser (`localStorage`). Ingen data
+  sendes til en server. Byg lokalt med `python build_site.py` og åbn
+  `../site/index.html` via en webserver, fx
+  `python -m http.server --directory ../site`.
+
+Udgivelse: hvert push til `main` tester, bygger og udgiver siden via
+`.github/workflows/pages.yml` på https://chjorsal.github.io/Gymnastik/.
+Engangsopsætning på GitHub: Settings → Pages → Source: **GitHub Actions**.
+
+## Test
+
+```
+python test_engine.py        motoren
+python test_actions.py       handlinger og browser-bro (uden server)
+python test_api.py           røgtest af serveren (starter sin egen)
+python test_build_site.py    browserudgavens build (kræver internet første gang)
+python test_e2e.py server    browsertest mod serveren   (kræver playwright + Edge)
+python test_e2e.py browser   browsertest mod browserudgaven
 ```
 
 Kommandolinje-versionen (`../lav_opvarmning_final.py fil1.xlsx ...`) bruger
-den samme `engine`. Kør én dag ad gangen — filer fra forskellige dage i samme
-kørsel deler opvarmningshallerne på samme klokkeslæt.
+den samme `engine`. Kør én dag ad gangen.

@@ -3,3 +3,5 @@ uvicorn
 pandas
 openpyxl
 python-multipart
+# kun til browsertesten (test_e2e.py):
+# playwright
