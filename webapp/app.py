@@ -150,7 +150,10 @@ def get_state():
 
 @app.post("/api/upload")
 async def upload(files: List[UploadFile] = File(...), show_hal: Optional[str] = Form(None)):
-    existing_names = {h["name"] for h in STATE["show_halls"]}
+    # En eksisterende hal UDEN hold (fx efter "Ryd alle hold") tæller ikke som
+    # optaget — den genbruges i stedet for at oprette "Arena (2)".
+    halls_with_rows = {r["OpvisningHal"] for r in STATE["raw_rows"]}
+    existing_names = {h["name"] for h in STATE["show_halls"] if h["name"] in halls_with_rows}
     pending_new_names = set()
     planned = []  # (hal_name, is_new_hal, suggested_start, rows) — intet er skrevet til STATE endnu
 
@@ -190,11 +193,15 @@ async def upload(files: List[UploadFile] = File(...), show_hal: Optional[str] = 
         planned.append((hal_name, is_new_hal, suggested_start, rows))
 
     for hal_name, is_new_hal, suggested_start, rows in planned:
-        if is_new_hal and find_show_hal(hal_name) is None:
-            STATE["show_halls"].append({
-                "name": hal_name,
-                "startTime": suggested_start or "09:00",
-            })
+        if is_new_hal:
+            existing = find_show_hal(hal_name)
+            if existing is None:
+                STATE["show_halls"].append({
+                    "name": hal_name,
+                    "startTime": suggested_start or "09:00",
+                })
+            elif suggested_start:
+                existing["startTime"] = suggested_start  # genbrugt tom hal: filens starttid gælder
         start_order = next_order(hal_name)
         for i, row in enumerate(rows):
             row["Order"] = start_order + i

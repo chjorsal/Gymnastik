@@ -4,178 +4,252 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Opvarmningsplanlægger</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=23">
+<link rel="stylesheet" href="style.css?v=32">
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg bg-body sticky-top border-bottom shadow-sm">
-  <div class="container-fluid px-3 px-lg-4 py-2">
-    <span class="navbar-brand d-flex align-items-center gap-2 mb-0 me-4">
-      <span class="brand-mark">
+<div class="app">
+
+  <!-- ===== Menu ===== -->
+  <aside class="rail">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/><path d="M12 2v3"/></svg>
       </span>
-      <span class="fw-bold fs-6">Opvarmningsplanlægger</span>
-    </span>
-    <div class="d-flex align-items-center gap-2 flex-wrap ms-auto">
-      <form id="upload-form" class="d-flex align-items-center gap-2">
-        <input type="file" id="file-input" multiple accept=".xlsx" class="form-control form-control-sm">
-        <button type="submit" class="btn btn-primary btn-sm d-inline-flex align-items-center gap-1 text-nowrap">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          Indlæs Excel-fil(er)
-        </button>
-      </form>
-      <button id="btn-halls" type="button" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" data-bs-toggle="offcanvas" data-bs-target="#halls-panel">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-        Haller
-      </button>
-      <a id="btn-export" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" href="/api/export.xlsx">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Hent Excel-plan
-      </a>
-      <button id="btn-reset" type="button" class="btn btn-outline-danger btn-sm d-inline-flex align-items-center gap-1">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-        Ryd hold
-      </button>
+      <span class="brand-name">Opvarmning</span>
     </div>
-  </div>
-</nav>
 
-<div class="offcanvas offcanvas-end" tabindex="-1" id="halls-panel">
-  <div class="offcanvas-header border-bottom">
-    <h2 class="offcanvas-title h5 mb-0">Haller</h2>
+    <nav class="rail-nav" aria-label="Sider">
+      <button type="button" class="rail-link" data-view="oversigt">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+        Oversigt
+      </button>
+      <button type="button" class="rail-link" data-view="program">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+        Program
+      </button>
+      <button type="button" class="rail-link" data-view="opvarmning">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg>
+        Opvarmning
+        <span id="problem-count" class="rail-count hidden"></span>
+      </button>
+    </nav>
+
+    <button id="btn-halls" type="button" class="rail-link rail-settings" data-bs-toggle="offcanvas" data-bs-target="#halls-panel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Haller
+    </button>
+  </aside>
+
+  <!-- ===== Indhold ===== -->
+  <main class="main">
+    <header class="page-head">
+      <div>
+        <h1 id="page-title" class="page-title">Oversigt</h1>
+        <p id="page-sub" class="page-sub"></p>
+      </div>
+      <div class="page-actions">
+        <input type="file" id="file-input" multiple accept=".xlsx" class="visually-hidden" tabindex="-1">
+        <button id="btn-upload" type="button" class="btn btn-outline-secondary">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Indlæs Excel
+        </button>
+        <a id="btn-export" class="btn btn-primary" href="/api/export.xlsx">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Hent Excel-plan
+        </a>
+      </div>
+    </header>
+
+    <!-- ----- Oversigt ----- -->
+    <section id="oversigt-view" class="view">
+
+      <div id="onboarding" class="onboarding hidden">
+        <ol class="steps">
+          <li id="step-halls" class="step">
+            <span class="step-mark"></span>
+            <div>
+              <h2 class="step-title">Tjek opvarmningshallerne</h2>
+              <p id="step-halls-text" class="step-text"></p>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#halls-panel">Ret haller</button>
+            </div>
+          </li>
+          <li id="step-upload" class="step">
+            <span class="step-mark"></span>
+            <div>
+              <h2 class="step-title">Indlæs dagens program</h2>
+              <p class="step-text">Én Excel-fil pr. opvisningshal, fra samme dag.</p>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step-mark"></span>
+            <div>
+              <h2 class="step-title">Tjek planen og hent den</h2>
+              <p class="step-text">Opvarmningen fordeles automatisk. Ret det, der skal rettes, og hent planen som Excel.</p>
+            </div>
+          </li>
+        </ol>
+
+        <label id="dropzone" class="dropzone" for="file-input">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
+          <span class="dropzone-title">Træk Excel-filer hertil</span>
+          <span class="dropzone-text">eller klik for at vælge dem</span>
+        </label>
+      </div>
+
+      <div id="overview-data" class="hidden">
+        <button id="problem-banner" type="button" class="problem-banner hidden"></button>
+
+        <section class="band">
+          <div class="section-head">
+            <h2 class="section-title">Opvarmning i løbet af dagen</h2>
+            <div id="timeline-legend" class="legend"></div>
+          </div>
+          <div class="timeline-scroll">
+            <div id="timeline" class="timeline"></div>
+          </div>
+        </section>
+
+        <section class="show-halls">
+          <h2 class="section-title">Opvisningshaller</h2>
+          <ul id="show-hall-summary" class="hall-rows"></ul>
+        </section>
+      </div>
+    </section>
+
+    <!-- ----- Program ----- -->
+    <section id="program-view" class="view hidden">
+      <div id="hal-tabs" class="tabs"></div>
+
+      <div id="hal-toolbar" class="toolbar hidden">
+        <label class="start-label">
+          Start kl.
+          <input type="text" id="hal-start-time" placeholder="09:00" class="form-control form-control-sm start-time-input">
+        </label>
+        <div class="add-buttons">
+          <span class="add-label">Tilføj</span>
+          <button type="button" class="btn btn-sm btn-light add-special" data-type="dorene_aabner">Dørene åbner</button>
+          <button type="button" class="btn btn-sm btn-light add-special" data-type="pause">Pause</button>
+          <button type="button" class="btn btn-sm btn-light add-special" data-type="faneindmarch">Faneindmarch</button>
+          <button type="button" class="btn btn-sm btn-light add-special" data-type="faneudmarch">Faneudmarch</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="table-responsive">
+          <table id="teams-table" class="table align-middle mb-0">
+            <thead>
+              <tr>
+                <th class="drag-col"><span class="visually-hidden">Flyt</span></th>
+                <th>Hold</th>
+                <th class="narrow-col" title="Hvor længe holdet er på gulvet">Varighed</th>
+                <th class="narrow-col" title="Tom = standardtiden for holdtypen">Opvarmning</th>
+                <th class="narrow-col">Går på</th>
+                <th class="narrow-col">Opvisningshal</th>
+                <th class="action-col"><span class="visually-hidden">Slet</span></th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+        <div id="empty-state" class="empty-state hidden">
+          <p>Der er intet program i denne hal endnu.</p>
+          <button type="button" class="btn btn-sm btn-outline-secondary js-upload">Indlæs Excel</button>
+        </div>
+        <div id="no-hal-state" class="empty-state hidden">
+          <p>Indlæs en Excel-fil for at oprette den første opvisningshal.</p>
+          <button type="button" class="btn btn-sm btn-primary js-upload">Indlæs Excel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ----- Opvarmning ----- -->
+    <section id="opvarmning-view" class="view hidden">
+      <div id="warmup-hal-tabs" class="tabs"></div>
+
+      <div id="unplaced-warmup-section" class="panel panel-danger hidden">
+        <h2 class="panel-title">Mangler plads til opvarmning</h2>
+        <p class="panel-text">Giv holdet kortere opvarmning, flyt det i programmet, eller træk det hen på en hal ovenfor.</p>
+        <div class="table-responsive">
+          <table id="unplaced-warmup-table" class="table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Hold</th>
+                <th>Opvisningshal</th>
+                <th class="narrow-col">Går på</th>
+                <th class="narrow-col">Opvarmning</th>
+                <th class="narrow-col">Hal</th>
+              </tr>
+            </thead>
+            <tbody id="unplaced-warmup-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="table-responsive">
+          <table id="warmup-table" class="table align-middle mb-0">
+            <thead>
+              <tr>
+                <th class="narrow-col">Tid</th>
+                <th>Hold</th>
+                <th>Opvisningshal</th>
+                <th class="narrow-col">Går på</th>
+                <th class="narrow-col">Opvarmning</th>
+                <th class="narrow-col">Hal</th>
+              </tr>
+            </thead>
+            <tbody id="warmup-table-body"></tbody>
+          </table>
+        </div>
+        <div id="warmup-empty-state" class="empty-state hidden"><p>Ingen hold varmer op i denne hal.</p></div>
+        <div id="warmup-no-hal-state" class="empty-state hidden">
+          <p>Der er ingen opvarmningshaller endnu.</p>
+          <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="offcanvas" data-bs-target="#halls-panel">Opret hal</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Haller (sidepanel) ===== -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="halls-panel" aria-labelledby="halls-title">
+  <div class="offcanvas-header">
+    <h2 id="halls-title" class="offcanvas-title">Haller</h2>
     <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Luk"></button>
   </div>
   <div class="offcanvas-body">
-    <div class="hall-group mb-4">
-      <h3 class="h6 fw-bold mb-1">Opvarmningshaller</h3>
-      <p class="text-body-secondary small mb-3">Hallerne opvarmningen fordeles ud over. Marker en som "prioritet" (bruges bl.a. først til efterskolehold).</p>
-      <ul id="warmup-hall-list" class="list-group list-group-flush mb-3"></ul>
-      <form id="warmup-hall-form" class="d-flex gap-2">
-        <input type="text" class="form-control form-control-sm" placeholder="Navn på ny opvarmningshal" required>
-        <button type="submit" class="btn btn-primary btn-sm text-nowrap">Opret</button>
+    <div class="hall-group">
+      <h3 class="hall-group-title">Opvarmningshaller</h3>
+      <p class="hall-group-text">Stjernen markerer hallen, der fyldes først.</p>
+      <ul id="warmup-hall-list" class="list-group list-group-flush"></ul>
+      <form id="warmup-hall-form" class="add-form">
+        <input type="text" class="form-control form-control-sm" placeholder="Ny opvarmningshal" aria-label="Navn på ny opvarmningshal" required>
+        <button type="submit" class="btn btn-sm btn-outline-secondary">Opret</button>
       </form>
     </div>
+
     <div class="hall-group">
-      <h3 class="h6 fw-bold mb-1">Opvisningshaller</h3>
-      <p class="text-body-secondary small mb-3">Hver opvisningshal har sit eget program med et startklokkeslæt.</p>
-      <ul id="show-hall-list" class="list-group list-group-flush mb-3"></ul>
-      <form id="show-hall-form" class="d-flex gap-2">
-        <input type="text" class="form-control form-control-sm" placeholder="Navn på ny opvisningshal" required>
-        <button type="submit" class="btn btn-primary btn-sm text-nowrap">Opret</button>
+      <h3 class="hall-group-title">Opvisningshaller</h3>
+      <p class="hall-group-text">Navn og starttid. Oprettes automatisk, når du indlæser en fil.</p>
+      <ul id="show-hall-list" class="list-group list-group-flush"></ul>
+      <form id="show-hall-form" class="add-form">
+        <input type="text" class="form-control form-control-sm" placeholder="Ny opvisningshal" aria-label="Navn på ny opvisningshal" required>
+        <button type="submit" class="btn btn-sm btn-outline-secondary">Opret</button>
       </form>
+    </div>
+
+    <div class="hall-group danger-zone">
+      <h3 class="hall-group-title">Start forfra</h3>
+      <p class="hall-group-text">Fjerner alle hold og programpunkter. Hallerne bevares.</p>
+      <button id="btn-reset" type="button" class="btn btn-sm btn-outline-danger">Ryd alle hold</button>
     </div>
   </div>
 </div>
 
-<main class="container-fluid px-3 px-lg-4 py-4">
-  <div class="row g-3">
-    <aside class="col-lg-3">
-      <div class="card shadow-sm schedule-panel-card">
-        <div class="card-body">
-          <h2 class="h6 fw-bold mb-3">Tidsplan</h2>
-          <div class="btn-group w-100 mb-3" role="group" id="schedule-mode">
-            <button type="button" class="btn btn-outline-primary btn-sm mode-btn active" data-mode="opvisning">Opvisning</button>
-            <button type="button" class="btn btn-outline-primary btn-sm mode-btn" data-mode="opvarmning">Opvarmning</button>
-          </div>
-          <div id="warmup-hal-tabs" class="nav nav-pills flex-wrap gap-1 mb-3 hidden"></div>
-          <div id="schedule-list" class="schedule-list"></div>
-        </div>
-      </div>
-    </aside>
-
-    <section class="col-lg-9">
-      <div id="opvisning-view">
-        <div class="card shadow-sm mb-3">
-          <div class="card-body">
-            <div id="hal-tabs" class="nav nav-pills flex-wrap gap-2 mb-3"></div>
-
-            <div id="hal-toolbar" class="hal-toolbar hidden">
-              <label class="d-flex align-items-center gap-2 fw-semibold small mb-0">
-                Start kl.
-                <input type="text" id="hal-start-time" placeholder="HH:MM" class="form-control form-control-sm start-time-input">
-              </label>
-              <div class="add-buttons d-flex flex-wrap gap-2">
-                <button type="button" class="btn btn-outline-secondary btn-sm add-special" data-type="dorene_aabner"><svg class="plus-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Dørene åbner</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm add-special" data-type="pause"><svg class="plus-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Pause</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm add-special" data-type="faneindmarch"><svg class="plus-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Faneindmarch</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm add-special" data-type="faneudmarch"><svg class="plus-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Faneudmarch</button>
-              </div>
-            </div>
-
-            <p class="table-hint text-body-secondary small mb-3">Træk i <svg class="inline-icon" viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg> for at ændre rækkefølgen — opvisningstiden regnes automatisk ud fra varighederne.</p>
-            <div class="table-responsive">
-              <table id="teams-table" class="table table-hover align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th class="drag-col"></th>
-                    <th>Holdnavn</th>
-                    <th class="narrow-col">Varighed (min)</th>
-                    <th class="narrow-col">Opvarmningstid (min)</th>
-                    <th class="narrow-col">Opvisningstid</th>
-                    <th class="narrow-col">Opvisningshal</th>
-                    <th class="action-col"></th>
-                  </tr>
-                </thead>
-                <tbody id="table-body"></tbody>
-              </table>
-            </div>
-            <div id="empty-state" class="empty-state text-center text-body-secondary py-5 hidden">Ingen hold i denne hal endnu. Upload en Excel-fil eller opret en opvisningshal under "Haller".</div>
-            <div id="no-hal-state" class="empty-state text-center text-body-secondary py-5 hidden">Opret eller upload en opvisningshal for at komme i gang.</div>
-          </div>
-        </div>
-      </div>
-
-      <div id="opvarmning-view" class="hidden">
-        <div id="unplaced-warmup-section" class="card border-danger-subtle shadow-sm mb-3 hidden">
-          <div class="card-body">
-            <h2 class="unplaced-warmup-title h6 fw-bold text-danger text-uppercase d-flex align-items-center gap-2 mb-3"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Ikke placeret</h2>
-            <div class="table-responsive">
-              <table id="unplaced-warmup-table" class="table table-hover align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Holdnavn</th>
-                    <th>Opvisningshal</th>
-                    <th class="narrow-col">Opvisningstid</th>
-                    <th class="narrow-col">Opvarmningstid (min)</th>
-                    <th class="narrow-col">Flyt til hal</th>
-                  </tr>
-                </thead>
-                <tbody id="unplaced-warmup-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <h2 id="warmup-view-title" class="warmup-view-title h5 fw-bold mb-3"></h2>
-            <p class="table-hint text-body-secondary small mb-3">Opvisningstid og -hal er kun til reference her — de kan ikke rettes fra denne visning. Ret opvarmningstiden, flyt holdet til en anden hal med "Flyt til hal" eller ved at trække rækken hen på en hal-fane, eller træk rækken hen på et tidligere hold i listen for at bytte opvarmningstid.</p>
-            <div class="table-responsive">
-              <table id="warmup-table" class="table table-hover align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th class="narrow-col">Opvarmning</th>
-                    <th>Holdnavn</th>
-                    <th>Opvisningshal</th>
-                    <th class="narrow-col">Opvisningstid</th>
-                    <th class="narrow-col">Opvarmningstid (min)</th>
-                    <th class="narrow-col">Flyt til hal</th>
-                  </tr>
-                </thead>
-                <tbody id="warmup-table-body"></tbody>
-              </table>
-            </div>
-            <div id="warmup-empty-state" class="empty-state text-center text-body-secondary py-5 hidden">Ingen hold varmer op i denne hal endnu.</div>
-            <div id="warmup-no-hal-state" class="empty-state text-center text-body-secondary py-5 hidden">Opret en opvarmningshal under "Haller" for at komme i gang.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-  </div>
-</main>
-
 <script src="vendor/bootstrap.bundle.min.js"></script>
-<script src="app.js?v=23"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>
