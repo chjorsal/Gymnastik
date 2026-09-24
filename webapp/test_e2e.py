@@ -124,6 +124,57 @@ def common_flow(page, url, xlsx, dialogs, errors):
     check("eksport har ét ark pr. opvisningshal først", sheets[:2] == ["Opvisning Sal A", "Opvisning Sal B"], sheets)
 
 
+def browser_only(browser, context, page, url, dialogs):
+    """Det der kun gælder browserudgaven: lagring, faner og fejl ved indlæsning."""
+    rows = page.evaluate("() => STATE.rows.length")
+    stored = page.evaluate("() => JSON.parse(localStorage.getItem('opvarmning_plan_v1')).raw_rows.length")
+    check("planen gemmes i localStorage", stored == rows, (stored, rows))
+
+    page.reload()
+    page.wait_for_selector("#overview-data:not(.hidden)", timeout=120_000)
+    check("planen er der efter genindlæsning", page.evaluate("() => STATE.rows.length") == rows)
+
+    other = context.new_page()
+    other.goto(url)
+    other.wait_for_selector("#overview-data:not(.hidden)", timeout=120_000)
+    page.click(".rail-link[data-view=program]")
+    page.click(".add-special[data-type=pause]")
+    other.wait_for_function(f"() => STATE.rows.length === {rows + 1}", timeout=10_000)
+    check("ændring i én fane vises i den anden", other.evaluate("() => STATE.rows.length") == rows + 1)
+    other.close()
+
+    page.evaluate("() => localStorage.setItem('opvarmning_plan_v1', '{ødelagt')")
+    page.reload()
+    page.wait_for_selector("#onboarding:not(.hidden)", timeout=120_000)
+    broken = page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('opvarmning_plan_broken_'))")
+    check("ulæselig plan giver tom plan og gemmes til side", len(broken) == 1, broken)
+
+    blocked = browser.new_context()
+    blocked.add_init_script("Storage.prototype.setItem = function () { throw new Error('QuotaExceededError'); };")
+    bpage = blocked.new_page()
+    bdialogs = []
+    bpage.on("dialog", lambda d: (bdialogs.append(d.message), d.accept()))
+    bpage.goto(url)
+    bpage.wait_for_selector("#onboarding:not(.hidden)", timeout=120_000)
+    bpage.fill("#onb-warmup-form input", "Varm 1")
+    bpage.press("#onb-warmup-form input", "Enter")
+    bpage.wait_for_function("() => document.querySelectorAll('#onb-warmup-list li').length === 1")
+    bpage.fill("#onb-warmup-form input", "Varm 2")
+    bpage.press("#onb-warmup-form input", "Enter")
+    bpage.wait_for_function("() => document.querySelectorAll('#onb-warmup-list li').length === 2")
+    check("uden localStorage virker appen og siger det én gang",
+          len([d for d in bdialogs if "Gem plan" in d]) == 1, bdialogs)
+    blocked.close()
+
+    offline = browser.new_context()
+    offline.route("**/pyodide.asm.wasm", lambda r: r.abort())
+    opage = offline.new_page()
+    opage.goto(url)
+    opage.wait_for_selector("#boot-text:has-text('Kunne ikke indlæse planlæggeren')", timeout=60_000)
+    check("Pyodide der ikke kan hentes giver dansk fejl", True)
+    offline.close()
+
+
 def run(mode):
     tmp = tempfile.mkdtemp()
     xlsx = excel_file(tmp)
@@ -133,7 +184,15 @@ def run(mode):
             proc, url = start_server(tmp)
             procs.append(proc)
         else:
-            raise SystemExit("browser-udgaven testes fra Task 6")
+            import build_site
+            root = Path(tmp) / "www"
+            build_site.build(root / "Gymnastik")      # samme understi som GitHub Pages
+            port = free_port()
+            procs.append(subprocess.Popen(
+                [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(root)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            url = f"http://127.0.0.1:{port}/Gymnastik/"
+            wait_for(url)
 
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
@@ -144,6 +203,8 @@ def run(mode):
             page.on("pageerror", lambda e: errors.append(str(e)))
             common_flow(page, url, xlsx, dialogs, errors)
             check("ingen JavaScript-fejl", not errors, errors)
+            if mode == "browser":
+                browser_only(browser, context, page, url, dialogs)
             browser.close()
     finally:
         for proc in procs:

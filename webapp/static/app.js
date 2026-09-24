@@ -117,7 +117,21 @@ function readonlyCell(text, extraClass) {
 // ---------- Init ----------
 
 async function init() {
-  await Api.start(() => {});
+  const boot = document.getElementById("boot");
+  const bootText = document.getElementById("boot-text");
+  if (Api.mode === "browser") boot.classList.remove("hidden");
+  try {
+    await Api.start((text) => { bootText.textContent = text; });
+  } catch (e) {
+    bootText.textContent = e.message;
+    boot.classList.add("failed");
+    return;
+  }
+  boot.classList.add("hidden");
+  Api.onExternalChange(async () => {
+    STATE = await apiGet("/api/state");
+    render();
+  });
   document.getElementById("btn-export").addEventListener("click", () => handle(Api.exportPlan()));
   // En adresse som .../#program åbner direkte på den visning.
   const fromHash = location.hash.slice(1);

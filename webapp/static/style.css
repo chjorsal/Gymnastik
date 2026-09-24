@@ -319,6 +319,20 @@ tr.table-danger > td { background: var(--signal-soft) !important; }
 .add-form { display: flex; gap: 8px; margin-top: 10px; }
 .danger-zone { padding-top: 20px; border-top: 1px solid var(--line); }
 
+/* ---------- Indlæsningsskærm (browserudgaven) ---------- */
+
+.boot {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--chalk);
+}
+.boot-box { text-align: center; max-width: 360px; padding: 24px; }
+.boot-box .brand-mark { width: 44px; height: 44px; margin-bottom: 16px; }
+.boot-text { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+.boot-hint { color: var(--slate); margin: 0; }
+.boot.failed .boot-text { color: var(--signal); }
+.boot.failed .boot-hint { display: none; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
