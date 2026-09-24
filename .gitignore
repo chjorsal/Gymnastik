@@ -12,3 +12,6 @@ opvisning_med_opvarmning.xlsx
 
 # Lokale Claude-indstillinger
 .claude/settings.local.json
+
+# Excel-filer (hold- og programdata) holdes lokalt
+*.xlsx
