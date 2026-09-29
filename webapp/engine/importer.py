@@ -122,7 +122,7 @@ def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFram
     columns = [
         "id", "Hold", "Type", "AntalPersoner", "Holdtype", "ErBarn",
         "OpvisningHal", "Varighed", "OpvisningStart", "OpvarmningMinOverride",
-        "OpvarmningHalOverride", "OpvarmningStartOverride", "Order", "_ignored",
+        "OpvarmningHalOverride", "OpvarmningStartOverride", "Order", "Manual", "_ignored",
     ]
     if not raw_rows:
         return pd.DataFrame(columns=columns)
@@ -132,6 +132,8 @@ def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFram
         df["OpvarmningHalOverride"] = None
     if "OpvarmningStartOverride" not in df.columns:
         df["OpvarmningStartOverride"] = None
+    # Manual: hold tilføjet i hånden (ikke fra Excel) — navnet kan rettes
+    df["Manual"] = df["Manual"].fillna(False).astype(bool) if "Manual" in df.columns else False
 
     df["Holdtype"] = df["HoldtypeRaw"].apply(read_holdtype)
 

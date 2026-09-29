@@ -115,6 +115,16 @@ def common_flow(page, url, xlsx, dialogs, errors):
     check("ugyldig Excel giver besked og ændrer intet",
           any("skrald.xlsx" in d for d in dialogs) and page.evaluate("() => STATE.rows.length") == count_before)
 
+    # tilføj et hold i hånden (tilmelding på bagkant)
+    page.click(".rail-link[data-view=program]")
+    page.click("#btn-add-team")
+    page.wait_for_function("() => STATE.rows.some(r => r.hold === 'Sent hold')")
+    sent = page.evaluate("() => STATE.rows.find(r => r.hold === 'Sent hold')")
+    # (om der er plads til opvarmningen afhænger af hallerne; det testes i test_actions)
+    check("Hold-knappen tilføjer et 15/15-hold, der skal varme op",
+          sent["varighed"] == 15 and sent["opvarmningMinOverride"] == 15 and sent["needsWarmup"], sent)
+    check("navnet på et tilføjet hold kan rettes", page.locator("#table-body input.team-name").count() == 1)
+
     with page.expect_download() as dl:
         page.click("#btn-export")
     check("eksport henter opvisning_med_opvarmning.xlsx",
@@ -122,6 +132,13 @@ def common_flow(page, url, xlsx, dialogs, errors):
     data = Path(dl.value.path()).read_bytes()
     sheets = list(pd.read_excel(BytesIO(data), sheet_name=None))
     check("eksport har ét ark pr. opvisningshal først", sheets[:2] == ["Opvisning Sal A", "Opvisning Sal B"], sheets)
+    exported = pd.read_excel(BytesIO(data), sheet_name=None)
+    check("tilføjet hold er med i Excel", "Sent hold" in set(exported["Opvisning Sal A"]["Hold"]))
+
+    count = page.evaluate("() => STATE.rows.length")
+    page.locator("#table-body tr", has=page.locator("input.team-name")).locator(".row-delete").click()
+    page.wait_for_function(f"() => STATE.rows.length === {count - 1}")
+    check("hold kan slettes igen", page.evaluate("() => !STATE.rows.some(r => r.hold === 'Sent hold')"))
 
 
 def browser_only(browser, context, page, url, dialogs):
@@ -236,7 +253,8 @@ def run(mode):
             context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
             page = context.new_page()
             dialogs, errors = [], []
-            page.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
+            page.on("dialog", lambda d: (dialogs.append(d.message),
+                                         d.accept("Sent hold") if d.type == "prompt" else d.accept()))
             page.on("pageerror", lambda e: errors.append(str(e)))
             common_flow(page, url, xlsx, dialogs, errors)
             if mode == "server":

@@ -148,6 +148,35 @@ def run():
     actions.delete_row(plan, pause["id"])
     check("delete_row removes the row", pause["id"] not in [r["id"] for r in plan["raw_rows"]])
 
+    # ---------- tilføj hold manuelt (tilmelding på bagkant) ----------
+    plan_t = plan_with_halls()
+    actions.upload(plan_t, [("d.xlsx", excel_bytes([("Hold 1", 10)]))], show_hal="Sal A")
+    check("add_team without a name -> 400", raises(lambda: actions.add_team(plan_t, "Sal A", "  "), 400) is not None)
+    check("add_team in unknown hall -> 404", raises(lambda: actions.add_team(plan_t, "Ingen", "Nyt"), 404) is not None)
+    actions.add_team(plan_t, "Sal A", "  Sent hold ")
+    new = plan_t["raw_rows"][-1]
+    check("add_team puts a 15/15 team last in the hall",
+          (new["Hold"], new["Type"], new["Varighed"], new["OpvarmningMinOverride"], new["Order"])
+          == ("Sent hold", "hold", 15, 15, 1), new)
+    view = {r["id"]: r for r in actions.payload(plan_t)["rows"]}[new["id"]]
+    check("added team gets a warm-up slot", view["status"] == "OK" and view["opvarmningStart"] != "", view)
+    check("added team is marked manual in the view", view["manual"] is True)
+    actions.patch_row(plan_t, new["id"], "hold", "Omdøbt hold")
+    check("an added team can be renamed", new["Hold"] == "Omdøbt hold")
+    check("an Excel team still cannot be renamed",
+          raises(lambda: actions.patch_row(plan_t, plan_t["raw_rows"][0]["id"], "hold", "X"), 400) is not None)
+    actions.patch_row(plan_t, new["id"], "hold", "Opvisning")
+    check("a manual team is never reclassified by migrate",
+          actions.migrate(json.loads(json.dumps(plan_t)))["raw_rows"][-1]["Type"] == "hold")
+    sheets = pd.read_excel(BytesIO(actions.export_xlsx(plan_t)), sheet_name=None)
+    check("added team is in the Excel export", "Opvisning" in list(sheets["Opvisning Sal A"]["Hold"]))
+    actions.delete_row(plan_t, new["id"])
+    sheets = pd.read_excel(BytesIO(actions.export_xlsx(plan_t)), sheet_name=None)
+    check("deleted team is gone from the Excel export", list(sheets["Opvisning Sal A"]["Hold"]) == ["Hold 1"])
+    res = json.loads(__import__("planner.browser", fromlist=["x"]).call(
+        json.dumps(plan_t), "add_team", json.dumps({"hal": "Sal A", "name": "Via bro"})))
+    check("browser bridge allows add_team", res["ok"] and res["plan"]["raw_rows"][-1]["Hold"] == "Via bro", res.get("error"))
+
     # ---------- bytte opvarmningstid ----------
     check("swap with unknown team -> 404",
           raises(lambda: actions.swap_warmup_time(plan, "x", r2["id"]), 404) is not None)
