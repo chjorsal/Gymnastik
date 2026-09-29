@@ -90,6 +90,11 @@ class SpecialRowCreate(BaseModel):
     type: str
 
 
+class TeamCreate(BaseModel):
+    hal: str
+    name: str
+
+
 class ReorderPayload(BaseModel):
     hal: str
     orderedIds: List[str]
@@ -138,6 +143,11 @@ def delete_row(row_id: str):
 @app.post("/api/rows/special")
 def create_special_row(payload: SpecialRowCreate):
     return run_action(actions.add_special_row, payload.hal, payload.type)
+
+
+@app.post("/api/rows/team")
+def add_team(payload: TeamCreate):
+    return run_action(actions.add_team, payload.hal, payload.name)
 
 
 @app.post("/api/rows/reorder")

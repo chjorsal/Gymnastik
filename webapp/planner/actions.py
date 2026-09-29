@@ -85,9 +85,9 @@ def migrate(data) -> dict:
 
     # migrering: "hold"/"andet"-rækker genklassificeres ud fra nøgleordslisten.
     # Manuelt oprettede pause/fane-punkter og punkter brugeren selv har
-    # omdøbt (HoldEdited) røres ikke.
+    # omdøbt (HoldEdited) eller selv tilføjet (Manual) røres ikke.
     for row in data["raw_rows"]:
-        if row.get("Type") in ("hold", "andet") and not row.get("HoldEdited"):
+        if row.get("Type") in ("hold", "andet") and not row.get("HoldEdited") and not row.get("Manual"):
             reclassified = engine.classify_type(row.get("Hold", ""))
             if reclassified != row.get("Type"):
                 row["Type"] = reclassified
@@ -245,7 +245,7 @@ def patch_row(plan: dict, row_id: str, field: str, value=None) -> None:
             except (TypeError, ValueError):
                 value = None
     if key == "Hold":
-        if row.get("Type") == "hold":
+        if row.get("Type") == "hold" and not row.get("Manual"):
             raise ActionError("Holdnavn fra Excel-importen kan ikke ændres")
         value = str(value or "").strip()
         row["HoldEdited"] = True
@@ -275,6 +275,34 @@ def add_special_row(plan: dict, hal: str, row_type: str) -> None:
     if _find_show_hal(plan, hal) is None:
         raise ActionError("Opvisningshal ikke fundet", 404)
     plan["raw_rows"].append(engine.new_special_row(hal, row_type, _next_order(plan, hal)))
+
+
+MANUAL_TEAM_MINUTES = 15   # standard for et hold tilføjet i hånden: opvisning og opvarmning
+
+
+def add_team(plan: dict, hal: str, name: str) -> None:
+    """Tilføjer et hold i hånden (fx tilmeldt på bagkant) nederst i hallen med
+    15 min opvisning og 15 min opvarmning. Begge kan rettes bagefter."""
+    name = (name or "").strip()
+    if not name:
+        raise ActionError("Skriv et holdnavn")
+    if _find_show_hal(plan, hal) is None:
+        raise ActionError("Opvisningshal ikke fundet", 404)
+    plan["raw_rows"].append({
+        "id": engine.new_id(),
+        "Hold": name,
+        "Type": "hold",
+        "AntalPersoner": 0,
+        "HoldtypeRaw": None,
+        "AlderRaw": None,
+        "OpvisningHal": hal,
+        "Varighed": MANUAL_TEAM_MINUTES,
+        "OpvarmningMinOverride": MANUAL_TEAM_MINUTES,
+        "OpvarmningHalOverride": None,
+        "OpvarmningStartOverride": None,
+        "Order": _next_order(plan, hal),
+        "Manual": True,
+    })
 
 
 def reorder_rows(plan: dict, hal: str, ordered_ids: List[str]) -> None:

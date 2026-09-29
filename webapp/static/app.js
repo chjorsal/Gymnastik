@@ -163,6 +163,7 @@ async function init() {
   document.getElementById("show-hall-form").addEventListener("submit", (e) => onHallCreate(e, "show"));
 
   document.getElementById("hal-start-time").addEventListener("change", onStartTimeChange);
+  document.getElementById("btn-add-team").addEventListener("click", onAddTeam);
   document.querySelectorAll(".add-special").forEach((btn) => {
     btn.addEventListener("click", () => onAddSpecial(btn.dataset.type));
   });
@@ -264,6 +265,16 @@ async function onHallCreate(e, kind) {
 async function onStartTimeChange(e) {
   if (!activeHal) return;
   STATE = await apiJSON("/api/halls/show/starttime", "POST", { name: activeHal, startTime: e.target.value.trim() });
+  render();
+}
+
+// Hold tilmeldt på bagkant: 15 min opvisning og 15 min opvarmning, nederst
+// i den valgte hal. Tiderne kan rettes bagefter i rækken.
+async function onAddTeam() {
+  if (!activeHal) return;
+  const name = (prompt(`Navn på holdet, der skal tilføjes i ${activeHal}:`) || "").trim();
+  if (!name) return;
+  STATE = await apiJSON("/api/rows/team", "POST", { hal: activeHal, name });
   render();
 }
 
@@ -1032,7 +1043,7 @@ function renderTableBody(rows) {
 
     const tdHold = document.createElement("td");
     tdHold.className = "hold-col";
-    if (row.needsWarmup) {
+    if (row.needsWarmup && !row.manual) {
       // Rigtige holds navn kommer fra Excel-importen og kan ikke rettes her.
       const holdText = document.createElement("span");
       holdText.className = "hold-name-readonly";
@@ -1043,7 +1054,8 @@ function renderTableBody(rows) {
       holdInput.type = "text";
       holdInput.className = "form-control form-control-sm cell-input";
       holdInput.value = row.hold;
-      holdInput.classList.add("special-label");
+      // Selv tilføjede hold kan omdøbes; specialpunkter vises i kursiv.
+      holdInput.classList.add(row.manual ? "team-name" : "special-label");
       holdInput.addEventListener("change", () => patchRow(row.id, "hold", holdInput.value));
       tdHold.appendChild(holdInput);
     }

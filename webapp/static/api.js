@@ -64,6 +64,7 @@ const Api = (() => {
     ["PATCH", /^\/api\/rows\/([^/]+)$/, (m, b) => ["patch_row", { row_id: decodeURIComponent(m[1]), field: b.field, value: b.value ?? null }]],
     ["DELETE", /^\/api\/rows\/([^/]+)$/, (m) => ["delete_row", { row_id: decodeURIComponent(m[1]) }]],
     ["POST", /^\/api\/rows\/special$/, (m, b) => ["add_special_row", { hal: b.hal, row_type: b.type }]],
+    ["POST", /^\/api\/rows\/team$/, (m, b) => ["add_team", { hal: b.hal, name: b.name }]],
     ["POST", /^\/api\/rows\/reorder$/, (m, b) => ["reorder_rows", { hal: b.hal, ordered_ids: b.orderedIds }]],
     ["POST", /^\/api\/rows\/swap-warmup-time$/, (m, b) => ["swap_warmup_time", { dragged_id: b.draggedId, target_id: b.targetId }]],
     ["POST", /^\/api\/reset$/, () => ["reset_rows", {}]],

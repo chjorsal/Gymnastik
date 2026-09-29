@@ -14,7 +14,7 @@ from . import actions
 # De handlinger call() må køre. Navnene og argumenterne svarer til
 # funktionerne i planner.actions.
 ACTIONS = {
-    "patch_row", "delete_row", "add_special_row", "reorder_rows", "swap_warmup_time",
+    "patch_row", "delete_row", "add_special_row", "add_team", "reorder_rows", "swap_warmup_time",
     "reset_rows", "create_warmup_hall", "rename_warmup_hall", "delete_warmup_hall",
     "set_priority_hall", "create_show_hall", "rename_show_hall",
     "set_show_hall_start_time", "delete_show_hall",
