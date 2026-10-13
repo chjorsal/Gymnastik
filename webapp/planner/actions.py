@@ -269,6 +269,34 @@ def delete_row(plan: dict, row_id: str) -> None:
     plan["raw_rows"] = [r for r in plan["raw_rows"] if r["id"] != row_id]
 
 
+def move_rows(plan: dict, row_ids: List[str], hal: str) -> None:
+    """Flytter flere hold/punkter til en anden opvisningshal på én gang. De
+    lægges nederst i hallen i den rækkefølge, de havde i programmet."""
+    if not row_ids:
+        raise ActionError("Vælg mindst ét hold")
+    if _find_show_hal(plan, hal) is None:
+        raise ActionError("Opvisningshal ikke fundet", 404)
+    wanted = set(row_ids)
+    rows = [r for r in plan["raw_rows"] if r["id"] in wanted]
+    if not rows:
+        raise ActionError("De valgte hold findes ikke længere", 404)
+    order = _next_order(plan, hal)
+    for r in sorted(rows, key=lambda r: (r["OpvisningHal"], r["Order"])):
+        if r["OpvisningHal"] == hal:
+            continue
+        r["OpvisningHal"] = hal
+        r["Order"] = order
+        order += 1
+
+
+def delete_rows(plan: dict, row_ids: List[str]) -> None:
+    """Sletter flere hold/punkter på én gang (fx ved afbud)."""
+    if not row_ids:
+        raise ActionError("Vælg mindst ét hold")
+    wanted = set(row_ids)
+    plan["raw_rows"] = [r for r in plan["raw_rows"] if r["id"] not in wanted]
+
+
 def add_special_row(plan: dict, hal: str, row_type: str) -> None:
     if row_type not in SPECIAL_TYPES:
         raise ActionError("Ukendt type")

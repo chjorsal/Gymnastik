@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=39">
+<link rel="stylesheet" href="style.css?v=40">
 </head>
 <body>
 <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -170,15 +170,26 @@
         </div>
       </div>
 
+      <div id="bulk-bar" class="bulk-bar hidden" role="region" aria-label="Valgte hold">
+        <span id="bulk-count" class="bulk-count"></span>
+        <label class="bulk-move">Flyt til
+          <select id="bulk-target" class="form-select form-select-sm"></select>
+        </label>
+        <button id="bulk-move" type="button" class="btn btn-sm btn-light">Flyt</button>
+        <button id="bulk-delete" type="button" class="btn btn-sm bulk-danger">Slet valgte</button>
+        <button id="bulk-clear" type="button" class="btn btn-sm bulk-link">Fjern markering</button>
+      </div>
+
       <div class="panel">
         <div class="table-responsive">
           <table id="teams-table" class="table align-middle mb-0">
             <thead>
               <tr>
+                <th class="select-col"><input type="checkbox" id="select-all" class="form-check-input" aria-label="Vælg alle i hallen"></th>
                 <th class="drag-col"><span class="visually-hidden">Flyt</span></th>
                 <th>Hold</th>
                 <th class="narrow-col" title="Hvor længe holdet er på gulvet">Varighed</th>
-                <th class="narrow-col" title="Tom = standardtiden for holdtypen">Opvarmning</th>
+                <th class="narrow-col" title="Minutter. Standard er 15 (efterskoler 30)">Opvarmning</th>
                 <th class="narrow-col">Går på</th>
                 <th>Varmer op</th>
                 <th class="narrow-col">Opvisningshal</th>
@@ -297,6 +308,6 @@
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
 <script src="api.js?v=5"></script>
-<script src="app.js?v=43"></script>
+<script src="app.js?v=44"></script>
 </body>
 </html>

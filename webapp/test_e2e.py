@@ -332,6 +332,55 @@ def new_features(page, tmp, dialogs):
           page.is_hidden("#suggestions") and page.locator(".tl-lane-problem").count() == 0)
 
 
+def bulk_tests(page, dialogs):
+    """Vælg flere hold og flyt eller slet dem på én gang."""
+    page.click(".rail-link[data-view=program]")
+    page.locator("#hal-tabs .tab", has_text="Sal A").click()
+    check("bjælken er skjult, når intet er valgt", page.is_hidden("#bulk-bar"))
+    boxes = page.locator("#table-body td.select-col input")
+    names = lambda hal: page.evaluate(f"() => STATE.rows.filter(r => r.opvisningHal === '{hal}')"
+                                      ".sort((a, b) => a.order - b.order).map(r => r.hold)")
+    check("scenarie: Sal A har A-F", names("Sal A") == list("ABCDEF"), names("Sal A"))
+
+    boxes.nth(1).click()
+    boxes.nth(3).click(modifiers=["Shift"])
+    check("Shift-klik vælger B til D", page.inner_text("#bulk-count") == "3 valgt", page.inner_text("#bulk-count"))
+    opts = page.locator("#bulk-target option").all_inner_texts()
+    check("man kan vælge mellem de andre opvisningshaller", opts == ["Sal B"], opts)
+
+    page.set_viewport_size({"width": 1440, "height": 420})
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(200)
+    top = page.evaluate("() => document.getElementById('bulk-bar').getBoundingClientRect().top")
+    check("bjælken følger med, når man scroller ned", 0 <= top <= 40, top)
+    page.set_viewport_size({"width": 1440, "height": 900})
+
+    page.click("#bulk-move")
+    page.wait_for_function("() => STATE.rows.filter(r => r.opvisningHal === 'Sal B').length === 3")
+    check("de valgte flyttes i samme rækkefølge", names("Sal B") == ["B", "C", "D"], names("Sal B"))
+    check("resten bliver i hallen", names("Sal A") == ["A", "E", "F"], names("Sal A"))
+    check("markeringen nulstilles efter flytning", page.is_hidden("#bulk-bar"))
+
+    page.click("#select-all")
+    check("Vælg alle vælger hele hallen", page.inner_text("#bulk-count") == "3 valgt")
+    page.click("#bulk-clear")
+    check("Fjern markering fjerner alle valg", page.is_hidden("#bulk-bar") and not page.is_checked("#select-all"))
+
+    boxes.nth(0).click()
+    boxes.nth(2).click()
+    n = len(dialogs)
+    page.click("#bulk-delete")
+    page.wait_for_function("() => STATE.rows.filter(r => r.opvisningHal === 'Sal A').length === 1")
+    check("Slet valgte beder om bekræftelse og sletter", len(dialogs) > n and "Slet 2 valgte" in dialogs[-1]
+          and names("Sal A") == ["E"], (dialogs[-1:], names("Sal A")))
+
+    api(page, "DELETE", "/api/halls/show", {"name": "Sal B"})
+    refresh(page)
+    page.locator("#table-body td.select-col input").first.click()
+    check("med kun én opvisningshal kan der ikke flyttes", page.is_disabled("#bulk-move")
+          and page.locator("#bulk-target option").all_inner_texts() == ["Ingen anden hal"])
+
+
 def run(mode):
     tmp = tempfile.mkdtemp()
     xlsx = excel_file(tmp)
@@ -361,6 +410,7 @@ def run(mode):
             page.on("pageerror", lambda e: errors.append(str(e)))
             common_flow(page, url, xlsx, dialogs, errors)
             new_features(page, tmp, dialogs)
+            bulk_tests(page, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))
             check("ingen JavaScript-fejl", not errors, errors)

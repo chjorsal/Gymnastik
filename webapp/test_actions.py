@@ -253,6 +253,41 @@ def run():
     check("very long team name is accepted and exported",
           actions.add_team(plan_e, "Sal", "X" * 300) is None and pd.read_excel(BytesIO(actions.export_xlsx(plan_e)), sheet_name=None) is not None)
 
+    # ---------- flyt / slet flere hold på én gang ----------
+    plan_b = plan_with_halls()
+    actions.upload(plan_b, [("d.xlsx", excel_bytes([(f"H{i}", 10) for i in range(1, 7)]))], show_hal="Sal A")
+    actions.upload(plan_b, [("e.xlsx", excel_bytes([("B1", 10)]))], show_hal="Sal B")
+    ids = {r["Hold"]: r["id"] for r in plan_b["raw_rows"]}
+    before = copy.deepcopy(plan_b)
+    check("move_rows to unknown hall -> 404",
+          raises(lambda: actions.move_rows(plan_b, [ids["H1"]], "Ingen"), 404) is not None and plan_b == before)
+    check("move_rows with nothing selected -> 400", raises(lambda: actions.move_rows(plan_b, [], "Sal B"), 400) is not None)
+    check("move_rows with only unknown ids -> 404", raises(lambda: actions.move_rows(plan_b, ["x", "y"], "Sal B"), 404) is not None)
+    # valgt i "forkert" rækkefølge: rækkefølgen i hallen skal bevares
+    actions.move_rows(plan_b, [ids["H5"], ids["H2"], ids["H4"], "ukendt"], "Sal B")
+    sal_b = sorted((r for r in plan_b["raw_rows"] if r["OpvisningHal"] == "Sal B"), key=lambda r: r["Order"])
+    check("moved teams go last in the target hall in their original order",
+          [r["Hold"] for r in sal_b] == ["B1", "H2", "H4", "H5"], [r["Hold"] for r in sal_b])
+    check("orders in the target hall are unique", len({r["Order"] for r in sal_b}) == len(sal_b))
+    left = [r["Hold"] for r in plan_b["raw_rows"] if r["OpvisningHal"] == "Sal A"]
+    check("other teams stay in the source hall", sorted(left) == ["H1", "H3", "H6"], left)
+    view = {r["hold"]: r for r in actions.payload(plan_b)["rows"]}
+    check("moved teams get new show times from the target hall", view["H2"]["opvisningTid"] == "09:10", view["H2"])
+    actions.move_rows(plan_b, [ids["B1"]], "Sal B")
+    check("moving a team to the hall it is already in changes nothing",
+          next(r for r in plan_b["raw_rows"] if r["Hold"] == "B1")["Order"] == 0)
+
+    check("delete_rows with nothing selected -> 400", raises(lambda: actions.delete_rows(plan_b, []), 400) is not None)
+    actions.delete_rows(plan_b, [ids["H1"], ids["H3"], "ukendt"])
+    check("delete_rows removes all selected and ignores unknown ids",
+          sorted(r["Hold"] for r in plan_b["raw_rows"]) == ["B1", "H2", "H4", "H5", "H6"])
+    res = json.loads(__import__("planner.browser", fromlist=["x"]).call(
+        json.dumps(plan_b), "move_rows", json.dumps({"row_ids": [ids["H6"]], "hal": "Sal B"})))
+    check("browser bridge allows move_rows", res["ok"], res.get("error"))
+    res = json.loads(__import__("planner.browser", fromlist=["x"]).call(
+        json.dumps(plan_b), "delete_rows", json.dumps({"row_ids": [ids["H6"]]})))
+    check("browser bridge allows delete_rows", res["ok"] and len(res["plan"]["raw_rows"]) == 4, res.get("error"))
+
     # ---------- bytte opvarmningstid ----------
     check("swap with unknown team -> 404",
           raises(lambda: actions.swap_warmup_time(plan, "x", r2["id"]), 404) is not None)

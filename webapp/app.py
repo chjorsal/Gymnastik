@@ -95,6 +95,15 @@ class TeamCreate(BaseModel):
     name: str
 
 
+class RowsMove(BaseModel):
+    ids: List[str]
+    hal: str
+
+
+class RowsDelete(BaseModel):
+    ids: List[str]
+
+
 class PlaceWarmup(BaseModel):
     hal: str
     start: str
@@ -148,6 +157,16 @@ def delete_row(row_id: str):
 @app.post("/api/rows/special")
 def create_special_row(payload: SpecialRowCreate):
     return run_action(actions.add_special_row, payload.hal, payload.type)
+
+
+@app.post("/api/rows/move")
+def move_rows(payload: RowsMove):
+    return run_action(actions.move_rows, payload.ids, payload.hal)
+
+
+@app.post("/api/rows/delete")
+def delete_rows(payload: RowsDelete):
+    return run_action(actions.delete_rows, payload.ids)
 
 
 @app.post("/api/rows/team")
