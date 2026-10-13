@@ -7,6 +7,10 @@ let STATE = { warmupHalls: [], priorityHall: null, showHalls: [], rows: [], sche
 let activeHal = localStorage.getItem(ACTIVE_HAL_KEY) || null;
 // Siden åbner altid på oversigten.
 let currentView = "oversigt";
+// Valgte rækker under Program (flyt/slet flere på én gang). Gælder kun den
+// aktive opvisningshal og nulstilles, når man skifter hal.
+const selectedIds = new Set();
+let lastSelectIndex = null;
 let activeWarmupHal = localStorage.getItem(ACTIVE_WARMUP_HAL_KEY) || null;
 
 // ---------- Ikoner ----------
@@ -155,6 +159,20 @@ async function init() {
   });
   document.getElementById("btn-reset").addEventListener("click", onReset);
   document.getElementById("brand-home").addEventListener("click", () => setView("oversigt"));
+  document.getElementById("bulk-move").addEventListener("click", onBulkMove);
+  document.getElementById("bulk-delete").addEventListener("click", onBulkDelete);
+  document.getElementById("bulk-clear").addEventListener("click", () => {
+    selectedIds.clear();
+    lastSelectIndex = null;
+    renderTable();
+  });
+  document.getElementById("select-all").addEventListener("change", (e) => {
+    const rows = STATE.rows.filter((r) => r.opvisningHal === activeHal);
+    selectedIds.clear();
+    if (e.target.checked) rows.forEach((r) => selectedIds.add(r.id));
+    lastSelectIndex = null;
+    renderTable();
+  });
   let resizeTimer;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
@@ -290,6 +308,7 @@ function saveActiveHal() {
 }
 
 function setActiveHal(name) {
+  if (name !== activeHal) { selectedIds.clear(); lastSelectIndex = null; }
   activeHal = name;
   saveActiveHal();
   render();
@@ -1107,18 +1126,92 @@ function renderTable() {
   table.classList.remove("hidden");
   emptyState.classList.add("hidden");
 
+  // Fjern valg af rækker, der ikke længere findes i hallen.
+  const present = new Set(rows.map((r) => r.id));
+  [...selectedIds].forEach((id) => { if (!present.has(id)) selectedIds.delete(id); });
   renderTableBody(rows);
+  renderBulkBar(rows);
+}
+
+function toggleSelect(rows, index, checked, shift) {
+  if (shift && lastSelectIndex !== null) {
+    const [a, b] = [Math.min(lastSelectIndex, index), Math.max(lastSelectIndex, index)];
+    rows.slice(a, b + 1).forEach((r) => (checked ? selectedIds.add(r.id) : selectedIds.delete(r.id)));
+  } else if (checked) {
+    selectedIds.add(rows[index].id);
+  } else {
+    selectedIds.delete(rows[index].id);
+  }
+  lastSelectIndex = index;
+  renderTable();
+}
+
+function renderBulkBar(rows) {
+  const bar = document.getElementById("bulk-bar");
+  const all = document.getElementById("select-all");
+  const n = selectedIds.size;
+  all.checked = rows.length > 0 && n === rows.length;
+  all.indeterminate = n > 0 && n < rows.length;
+  bar.classList.toggle("hidden", n === 0);
+  if (!n) return;
+
+  document.getElementById("bulk-count").textContent = `${n} valgt`;
+  const target = document.getElementById("bulk-target");
+  const others = STATE.showHalls.map((h) => h.name).filter((name) => name !== activeHal);
+  const keep = others.includes(target.value) ? target.value : others[0];
+  target.replaceChildren(...(others.length ? others : ["Ingen anden hal"]).map((name) => {
+    const o = document.createElement("option");
+    o.value = others.length ? name : "";
+    o.textContent = name;
+    return o;
+  }));
+  if (keep) target.value = keep;
+  target.disabled = others.length === 0;
+  const move = document.getElementById("bulk-move");
+  move.disabled = others.length === 0;
+  move.title = others.length ? "" : "Opret en opvisningshal mere under Haller for at kunne flytte";
+}
+
+async function onBulkMove() {
+  const hal = document.getElementById("bulk-target").value;
+  if (!hal || !selectedIds.size) return;
+  STATE = await apiJSON("/api/rows/move", "POST", { ids: [...selectedIds], hal });
+  selectedIds.clear();
+  lastSelectIndex = null;
+  render();
+}
+
+async function onBulkDelete() {
+  const n = selectedIds.size;
+  if (!n || !confirm(`Slet ${n} valgte fra programmet? Det kan ikke fortrydes.`)) return;
+  STATE = await apiJSON("/api/rows/delete", "POST", { ids: [...selectedIds] });
+  selectedIds.clear();
+  lastSelectIndex = null;
+  render();
 }
 
 function renderTableBody(rows) {
   const tbody = document.getElementById("table-body");
   tbody.innerHTML = "";
 
-  rows.forEach((row) => {
+  rows.forEach((row, index) => {
     const tr = document.createElement("tr");
     tr.dataset.id = row.id;
     if (!row.needsWarmup) tr.classList.add("row-special");
     if (row.problemMessage) tr.classList.add("table-danger");
+    if (selectedIds.has(row.id)) tr.classList.add("selected");
+
+    const tdSel = document.createElement("td");
+    tdSel.className = "select-col";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "form-check-input";
+    cb.checked = selectedIds.has(row.id);
+    cb.setAttribute("aria-label", `Vælg ${row.hold}`);
+    cb.title = "Vælg (hold Shift nede for at vælge flere i træk)";
+    cb.addEventListener("click", (e) => toggleSelect(rows, index, cb.checked, e.shiftKey));
+    tdSel.appendChild(cb);
+    tr.appendChild(tdSel);
 
     makeDragSource(tr, row.id);
     makeDropTarget(tr, async (draggedId) => {

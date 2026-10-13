@@ -66,6 +66,8 @@ const Api = (() => {
     ["POST", /^\/api\/rows\/special$/, (m, b) => ["add_special_row", { hal: b.hal, row_type: b.type }]],
     ["POST", /^\/api\/rows\/([^/]+)\/place$/, (m, b) => ["place_warmup", { row_id: decodeURIComponent(m[1]), hal: b.hal, start: b.start }]],
     ["GET", /^\/api\/suggestions$/, () => ["suggestions", {}]],
+    ["POST", /^\/api\/rows\/move$/, (m, b) => ["move_rows", { row_ids: b.ids, hal: b.hal }]],
+    ["POST", /^\/api\/rows\/delete$/, (m, b) => ["delete_rows", { row_ids: b.ids }]],
     ["POST", /^\/api\/rows\/team$/, (m, b) => ["add_team", { hal: b.hal, name: b.name }]],
     ["POST", /^\/api\/rows\/reorder$/, (m, b) => ["reorder_rows", { hal: b.hal, ordered_ids: b.orderedIds }]],
     ["POST", /^\/api\/rows\/swap-warmup-time$/, (m, b) => ["swap_warmup_time", { dragged_id: b.draggedId, target_id: b.targetId }]],
