@@ -409,6 +409,9 @@ def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
 
 
 SUGGEST_MIN_MINUTES = 10   # kortere opvarmning end dette foreslås aldrig
+# Efterskoler og DGI-hold beholder altid deres 30 min, medmindre I selv
+# ændrer det — de forkortes aldrig af forslag eller "Find løsning".
+PROTECTED_TYPES = {"efterskole", "dgi"}
 SUGGEST_MAX_TEAMS = 10     # begræns beregningen, hvis rigtig mange hold mangler plads
 
 
@@ -417,7 +420,8 @@ def suggest_warmups(plan: dict) -> List[dict]:
     giver plads uden at skubbe andre hold ud. Ændrer ikke planen."""
     views = _views(plan)
     ok_before = _ok_ids(views)
-    unplaced = [r for r in views.values() if r["needsWarmup"] and r["status"] == "KAN IKKE PLANLÆGGES"]
+    unplaced = [r for r in views.values() if r["needsWarmup"] and r["status"] == "KAN IKKE PLANLÆGGES"
+                and r["holdtype"] not in PROTECTED_TYPES]
     suggestions = []
     for u in unplaced[:SUGGEST_MAX_TEAMS]:
         current = u["opvarmningMinOverride"] if u["opvarmningMinOverride"] is not None else u["opvarmningMinDefault"]
@@ -448,7 +452,7 @@ def _effective_minutes(view: dict) -> int:
 def solve_warmups(plan: dict) -> dict:
     """Prøver at give hold uden plads en opvarmning ved at forkorte holdet
     selv og holdene, der varmer op samtidig (ned til 10 min, aldrig
-    efterskoler). Små ændringer på få hold foretrækkes. Holdene tages ét ad
+    efterskoler eller DGI-hold). Små ændringer på få hold foretrækkes. Holdene tages ét ad
     gangen efter opvisningstid, og der regnes forfra efter hver løsning.
     Ændrer ikke planen — returnerer forslaget."""
     work = copy.deepcopy(plan)
@@ -471,11 +475,11 @@ def solve_warmups(plan: dict) -> dict:
             centre = sum(window) / 2
             neighbours = sorted(
                 (v for v in views.values()
-                 if v["status"] == "OK" and v["holdtype"] != "efterskole"
+                 if v["status"] == "OK" and v["holdtype"] not in PROTECTED_TYPES
                  and v["opvarmningStartMin"] < window[1] and v["opvarmningSlutMin"] > window[0]),
                 key=lambda v: abs((v["opvarmningStartMin"] + v["opvarmningSlutMin"]) / 2 - centre),
             )[:SOLVE_MAX_NEIGHBOURS]
-            own = [] if u["holdtype"] == "efterskole" else [u]
+            own = [] if u["holdtype"] in PROTECTED_TYPES else [u]
             # billigste forsøg først: få minutter på få hold
             attempts = sorted(
                 ((d, n) for d in range(1, SOLVE_MAX_REDUCTION + 1) for n in range(len(neighbours) + 1)),

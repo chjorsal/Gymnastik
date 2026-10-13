@@ -319,6 +319,15 @@ def run():
     sol_e = actions.solve_warmups(plan_eft)
     check("efterskoler are never shortened by solve", all("Efterskole" not in c["hold"] for c in sol_e["changes"]), sol_e)
 
+    plan_dgi = actions.new_plan()
+    actions.create_warmup_hall(plan_dgi, "V1")
+    actions.create_show_hall(plan_dgi, "Sal")
+    actions.upload(plan_dgi, [("d.xlsx", excel_bytes([("DGI Østjylland Rephold", 12), ("A", 12), ("B", 12), ("C", 12),
+                                                         ("DGI MiniMix", 12), ("D", 12)]))], show_hal="Sal")
+    sol_d = actions.solve_warmups(plan_dgi)
+    check("DGI teams are never shortened by solve", all("DGI" not in c["hold"] for c in sol_d["changes"]), sol_d["changes"])
+    check("DGI teams get no shorter-warm-up suggestion",
+          all("DGI" not in x["hold"] for x in actions.suggest_warmups(plan_dgi)))
     check("apply_warmup_minutes rejects unknown team", raises(lambda: actions.apply_warmup_minutes(
         plan_eft, [{"id": "x", "minutes": 12}]), 404) is not None)
     check("apply_warmup_minutes rejects < 1 min", raises(lambda: actions.apply_warmup_minutes(
