@@ -11,19 +11,17 @@ MAX_EARLY_MIN = 10
 # Standard opvarmningstider i minutter (bruges når et hold ikke har fået en
 # manuel opvarmningstid sat i UI'en)
 OPVARMNING_TIDER = {
-    #              barn  voksen
-    "spring":     (15,   15),
-    "rytme":      (15,   15),
-    "mix":        (15,   15),
-    "efterskole": (30,   30),
-    "dgi":        (30,   30),
-    "ukendt":     (15,   15),
+    "spring": 15,
+    "rytme": 15,
+    "mix": 15,
+    "efterskole": 30,
+    "dgi": 30,
+    "ukendt": 15,
 }
 
-GANG_BARN = 10
-GANG_VOKSEN = 5
-GANG_EFTERSKOLE = 10
-FLEX_BARN = 15
+# Gangtid fra opvarmningshal til opvisningshal — ens for alle hold, fordi
+# Excel-filerne ikke siger, om et hold er børn eller voksne.
+GANG_MIN = 5
 
 GYLDIGE_HOLDTYPER = {"spring", "rytme", "dans", "mix", "efterskole", "akademiet", "dgi"}
 
@@ -64,18 +62,3 @@ TYPE_KEYWORDS = [
     (r"\bopvisning\b", "andet"),
 ]
 
-
-VOKSEN_TOKENS = [
-    "damer", "kvinder", "herrer", "mænd", "30+", "senior",
-    "øvede", "fusion", "impuls", "zenit", "vikuvika",
-    "rephold", "afterrep", "ynglingehold", "move-mænd",
-    "bydrengene", "powermix", "skødstrup mix", "r3vive",
-    "rebounce", "opvisningspiger", "højbjerg øvede",
-    "show-mix", "sprød", "brobyholdet",
-]
-BARN_TOKENS = [
-    "junior", "mini", "børne", "powerkids",
-    "hoptimist", "tigerspringerne", "supergirls",
-    "tons og tøser", "mixspring", "springmix",
-    "teamspring", "turbo", "tornado",
-]

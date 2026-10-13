@@ -47,7 +47,7 @@ def to_row_dicts(df: pd.DataFrame, warmup_halls: List[str]) -> List[dict]:
             "opvarmningStartMin": minutes_from_day_start(r["OpvarmningStart"]),
             "opvarmningSlutMin": minutes_from_day_start(r["OpvarmningSlut"]),
             "opvarmningMinOverride": override_int(r["OpvarmningMinOverride"]),
-            "opvarmningMinDefault": opvarmning_minutter(r["Holdtype"], r["ErBarn"]),
+            "opvarmningMinDefault": opvarmning_minutter(r["Holdtype"]),
             "opvarmningHalOverride": override_str(r["OpvarmningHalOverride"]),
             "opvarmningStartOverride": override_str(r["OpvarmningStartOverride"]),
             "opvarmningHalBeregnet": r["OpvarmningHal"],

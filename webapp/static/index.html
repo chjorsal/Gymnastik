@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=38">
+<link rel="stylesheet" href="style.css?v=39">
 </head>
 <body>
 <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -23,12 +23,12 @@
 
   <!-- ===== Menu ===== -->
   <aside class="rail">
-    <div class="brand">
+    <button id="brand-home" type="button" class="brand" title="Til oversigten">
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/><path d="M12 2v3"/></svg>
       </span>
       <span class="brand-name">Opvarmning</span>
-    </div>
+    </button>
 
     <nav class="rail-nav" aria-label="Sider">
       <button type="button" class="rail-link" data-view="oversigt">
@@ -81,7 +81,7 @@
             <span class="step-mark"></span>
             <div class="step-body">
               <h2 class="step-title">Opvarmningshaller</h2>
-              <p class="step-text">Hallerne holdene kan varme op i. Den første bliver fyldt først.</p>
+              <p class="step-text">Hallerne holdene kan varme op i. Klik på stjernen ved den hal, efterskolerne skal varme op i først.</p>
               <ul id="onb-warmup-list" class="onb-list"></ul>
               <form id="onb-warmup-form" class="add-form">
                 <input type="text" class="form-control form-control-sm" placeholder="Navn på opvarmningshal" aria-label="Navn på opvarmningshal" required>
@@ -129,6 +129,11 @@
         <button id="problem-banner" type="button" class="problem-banner hidden"></button>
         <button id="overnight-banner" type="button" class="problem-banner hidden"></button>
 
+        <section id="suggestions" class="hall-section hidden">
+          <h2 class="section-title">Forslag til hold uden plads</h2>
+          <ul id="suggestion-list" class="hall-rows"></ul>
+        </section>
+
         <section class="band">
           <div class="section-head">
             <h2 class="section-title">Opvarmning i løbet af dagen</h2>
@@ -175,6 +180,7 @@
                 <th class="narrow-col" title="Hvor længe holdet er på gulvet">Varighed</th>
                 <th class="narrow-col" title="Tom = standardtiden for holdtypen">Opvarmning</th>
                 <th class="narrow-col">Går på</th>
+                <th>Varmer op</th>
                 <th class="narrow-col">Opvisningshal</th>
                 <th class="action-col"><span class="visually-hidden">Slet</span></th>
               </tr>
@@ -290,7 +296,7 @@
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
-<script src="api.js?v=4"></script>
-<script src="app.js?v=42"></script>
+<script src="api.js?v=5"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>

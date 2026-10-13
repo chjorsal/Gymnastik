@@ -95,6 +95,11 @@ class TeamCreate(BaseModel):
     name: str
 
 
+class PlaceWarmup(BaseModel):
+    hal: str
+    start: str
+
+
 class ReorderPayload(BaseModel):
     hal: str
     orderedIds: List[str]
@@ -148,6 +153,16 @@ def create_special_row(payload: SpecialRowCreate):
 @app.post("/api/rows/team")
 def add_team(payload: TeamCreate):
     return run_action(actions.add_team, payload.hal, payload.name)
+
+
+@app.post("/api/rows/{row_id}/place")
+def place_warmup(row_id: str, payload: PlaceWarmup):
+    return run_action(actions.place_warmup, row_id, payload.hal, payload.start)
+
+
+@app.get("/api/suggestions")
+def suggestions():
+    return actions.suggest_warmups(STATE)
 
 
 @app.post("/api/rows/reorder")

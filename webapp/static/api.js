@@ -64,6 +64,8 @@ const Api = (() => {
     ["PATCH", /^\/api\/rows\/([^/]+)$/, (m, b) => ["patch_row", { row_id: decodeURIComponent(m[1]), field: b.field, value: b.value ?? null }]],
     ["DELETE", /^\/api\/rows\/([^/]+)$/, (m) => ["delete_row", { row_id: decodeURIComponent(m[1]) }]],
     ["POST", /^\/api\/rows\/special$/, (m, b) => ["add_special_row", { hal: b.hal, row_type: b.type }]],
+    ["POST", /^\/api\/rows\/([^/]+)\/place$/, (m, b) => ["place_warmup", { row_id: decodeURIComponent(m[1]), hal: b.hal, start: b.start }]],
+    ["GET", /^\/api\/suggestions$/, () => ["suggestions", {}]],
     ["POST", /^\/api\/rows\/team$/, (m, b) => ["add_team", { hal: b.hal, name: b.name }]],
     ["POST", /^\/api\/rows\/reorder$/, (m, b) => ["reorder_rows", { hal: b.hal, ordered_ids: b.orderedIds }]],
     ["POST", /^\/api\/rows\/swap-warmup-time$/, (m, b) => ["swap_warmup_time", { dragged_id: b.draggedId, target_id: b.targetId }]],
@@ -172,6 +174,7 @@ const Api = (() => {
       const route = ROUTES.find(([m, re]) => m === method && re.test(url));
       if (!route) throw new ApiError(`Ukendt handling: ${method} ${url}`, 400);
       const [name, args] = route[2](url.match(route[1]), body || {});
+      if (name === "suggestions") return JSON.parse(bridge.suggestions(planJson));
       return answer(bridge.call(planJson, name, JSON.stringify(args)), name !== "payload");
     },
     async upload(files, hal) {

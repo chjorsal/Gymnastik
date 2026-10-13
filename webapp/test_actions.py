@@ -177,6 +177,82 @@ def run():
         json.dumps(plan_t), "add_team", json.dumps({"hal": "Sal A", "name": "Via bro"})))
     check("browser bridge allows add_team", res["ok"] and res["plan"]["raw_rows"][-1]["Hold"] == "Via bro", res.get("error"))
 
+    # ---------- placér opvarmning i et hul (træk på tidslinjen) ----------
+    plan_p = actions.new_plan()
+    actions.create_warmup_hall(plan_p, "V1")
+    actions.create_show_hall(plan_p, "Sal")
+    actions.upload(plan_p, [("d.xlsx", excel_bytes([("A", 30), ("B", 30)]))], show_hal="Sal")
+    a, b = plan_p["raw_rows"]
+    check("place_warmup unknown team -> 404", raises(lambda: actions.place_warmup(plan_p, "x", "V1", "08:00"), 404) is not None)
+    check("place_warmup unknown hall -> 400", raises(lambda: actions.place_warmup(plan_p, a["id"], "Nope", "08:00"), 400) is not None)
+    check("place_warmup bad time -> 400", raises(lambda: actions.place_warmup(plan_p, a["id"], "V1", "kl 8"), 400) is not None)
+    actions.place_warmup(plan_p, b["id"], "V1", "9.10")
+    vb = {r["id"]: r for r in actions.payload(plan_p)["rows"]}[b["id"]]
+    check("place_warmup pins hall and start time", (vb["opvarmningHalBeregnet"], vb["opvarmningStart"], vb["status"])
+          == ("V1", "09:10", "OK"), vb)
+    before = copy.deepcopy(plan_p)
+    err = raises(lambda: actions.place_warmup(plan_p, a["id"], "V1", "09:15"), 400)
+    check("place_warmup on an occupied slot is refused, plan unchanged",
+          err is not None and "ikke plads" in err.message and plan_p == before, err and err.message)
+    err = raises(lambda: actions.place_warmup(plan_p, a["id"], "V1", "08:50"), 400)
+    check("place_warmup that ends after the show is refused", err is not None and plan_p == before)
+
+    # ---------- forslag om kortere opvarmning (ned til 10 min) ----------
+    plan_s2 = actions.new_plan()
+    actions.create_warmup_hall(plan_s2, "V1")
+    actions.create_show_hall(plan_s2, "Sal")
+    actions.upload(plan_s2, [("d.xlsx", excel_bytes([(c, 12) for c in "ABCDEF"]))], show_hal="Sal")
+    # én hal, et hold hvert 12. minut: D og F får ikke plads med 15 min
+    unplaced = [r["hold"] for r in actions.payload(plan_s2)["rows"] if r["status"] != "OK"]
+    check("scenario: D and F have no room with 15 min", unplaced == ["D", "F"], unplaced)
+    before = copy.deepcopy(plan_s2)
+    sug = actions.suggest_warmups(plan_s2)
+    check("F gets the longest warm-up that fits (12 min)",
+          [(x["hold"], x["minutes"], x["hal"], x["start"], x["end"]) for x in sug] == [("F", 12, "V1", "09:43", "09:55")], sug)
+    check("D gets no suggestion: not even 10 min fits", all(x["hold"] != "D" for x in sug))
+    check("suggestions never go below 10 min", all(x["minutes"] >= 10 for x in sug))
+    check("suggest_warmups does not change the plan", plan_s2 == before)
+    actions.patch_row(plan_s2, sug[0]["id"], "opvarmningMin", sug[0]["minutes"])
+    f = {r["hold"]: r for r in actions.payload(plan_s2)["rows"]}["F"]
+    check("using the suggestion places the team as promised", (f["status"], f["opvarmningStart"]) == ("OK", "09:43"), f)
+
+    # ---------- kanttilfælde ----------
+    plan_e = actions.new_plan()
+    actions.create_warmup_hall(plan_e, "V1")
+    actions.create_show_hall(plan_e, "Sal")
+    actions.upload(plan_e, [("d.xlsx", excel_bytes([("A", 30), ("B", 30)]))], show_hal="Sal")
+    actions.add_special_row(plan_e, "Sal", "pause")
+    pause_id = plan_e["raw_rows"][-1]["id"]
+    err = raises(lambda: actions.place_warmup(plan_e, pause_id, "V1", "08:00"), 400)
+    check("a pause cannot be given a warm-up", err is not None and "Kun hold" in err.message, err and err.message)
+    check("place_warmup rejects 24:00", raises(lambda: actions.place_warmup(plan_e, plan_e["raw_rows"][0]["id"], "V1", "24:00"), 400) is not None)
+    a_id = plan_e["raw_rows"][0]["id"]
+    actions.place_warmup(plan_e, a_id, "V1", "08:00")
+    va = {r["id"]: r for r in actions.payload(plan_e)["rows"]}[a_id]
+    check("an already placed team can be moved to a free slot", (va["opvarmningStart"], va["status"]) == ("08:00", "OK"), va)
+
+    plan_n = actions.new_plan()
+    actions.create_show_hall(plan_n, "Sal")
+    actions.upload(plan_n, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal")
+    check("no warm-up halls -> no suggestions (nothing to place in)", actions.suggest_warmups(plan_n) == [])
+    check("place_warmup without warm-up halls is refused",
+          raises(lambda: actions.place_warmup(plan_n, plan_n["raw_rows"][0]["id"], "V1", "08:00"), 400) is not None)
+
+    plan_10 = actions.new_plan()
+    actions.create_warmup_hall(plan_10, "V1")
+    actions.create_show_hall(plan_10, "Sal")
+    actions.upload(plan_10, [("d.xlsx", excel_bytes([(c, 12) for c in "ABCDEF"]))], show_hal="Sal")
+    for r in plan_10["raw_rows"]:
+        if r["Hold"] == "F":
+            r["OpvarmningMinOverride"] = 10
+    check("a team already at 10 min gets no suggestion", all(x["hold"] != "F" for x in actions.suggest_warmups(plan_10)))
+
+    weird = '<script>alert("x")</script> Ø-hold & co'
+    actions.add_team(plan_e, "Sal", weird)
+    check("team names with HTML/special characters are stored as plain text", plan_e["raw_rows"][-1]["Hold"] == weird)
+    check("very long team name is accepted and exported",
+          actions.add_team(plan_e, "Sal", "X" * 300) is None and pd.read_excel(BytesIO(actions.export_xlsx(plan_e)), sheet_name=None) is not None)
+
     # ---------- bytte opvarmningstid ----------
     check("swap with unknown team -> 404",
           raises(lambda: actions.swap_warmup_time(plan, "x", r2["id"]), 404) is not None)
