@@ -146,7 +146,7 @@ def run():
         f"x_start={x_start} y_start={y_start}",
     )
 
-    # AntalPersoner NaN/blank -> 0, ErBarn resolution, ignored logic
+    # AntalPersoner NaN/blank -> 0, ignored logic
     zero_antal_row = {
         "id": "z", "Hold": "Zero Antal Hold", "Type": "hold", "AntalPersoner": 0,
         "HoldtypeRaw": None, "AlderRaw": None, "OpvisningHal": "TestHal",
@@ -342,7 +342,7 @@ def run():
     check("DGI auto-detected from name", df_dgi.iloc[0]["Holdtype"] == "dgi")
     check(
         "DGI default warmup is 30 min",
-        engine.opvarmning_minutter("dgi", False) == 30,
+        engine.opvarmning_minutter("dgi") == 30,
     )
 
     # non-hold types (pause/faneindmarch/etc) never get warmup regardless of data
@@ -474,6 +474,31 @@ def run():
           dicts["n0"]["opvarmningSlutMin"] - dicts["n0"]["opvarmningStartMin"] == 15, dicts["n0"])
     check("a show after midnight is past 1440 minutes, not wrapped to morning",
           dicts["n8"]["opvisningMin"] == 9 * 60 + 8 * 120 and dicts["n8"]["opvisningTid"] == "01:00", dicts["n8"])
+
+    # ============================================================
+    # alle hold behandles ens: 5 min gangtid, intet gæt på børn/voksne
+    # ============================================================
+    def one_team(hold, antal=10, alder=None):
+        row = {"id": "e1", "Hold": hold, "Type": "hold", "AntalPersoner": antal, "HoldtypeRaw": None,
+               "AlderRaw": alder, "OpvisningHal": "Sal", "Varighed": 10, "OpvarmningMinOverride": None,
+               "OpvarmningHalOverride": None, "Order": 0}
+        df = engine.compute_plan(engine.build_dataframe([row], [{"name": "Sal", "startTime": "09:00"}]),
+                                 ["Hal A", "Hal B"], "Hal B")
+        return df.iloc[0]
+
+    for name in ["Junior mini 3.-5. klasse", "Damer 30+", "Hold uden kendetegn"]:
+        r = one_team(name)
+        check(f"'{name}': 15 min warm-up ending 5 min before show",
+              (r["OpvarmningStart"], r["OpvarmningSlut"]) == (datetime(2000, 1, 1, 8, 40), datetime(2000, 1, 1, 8, 55)),
+              (r["OpvarmningStart"], r["OpvarmningSlut"]))
+    r = one_team("Junior", alder="barn")
+    check("an Alder column is ignored (no child rules)", r["OpvarmningSlut"] == datetime(2000, 1, 1, 8, 55), r["OpvarmningSlut"])
+    r = one_team("Testby Efterskole")
+    check("efterskole: 30 min warm-up, 5 min walk, in the priority hall",
+          (r["OpvarmningStart"], r["OpvarmningSlut"], r["OpvarmningHal"])
+          == (datetime(2000, 1, 1, 8, 25), datetime(2000, 1, 1, 8, 55), "Hal B"), (r["OpvarmningStart"], r["OpvarmningHal"]))
+    check("big teams get no special priority", engine.priority_rank("spring") == engine.priority_rank("ukendt"))
+    check("efterskole is placed first", engine.priority_rank("efterskole") < engine.priority_rank("spring"))
 
     # ============================================================
     # summary

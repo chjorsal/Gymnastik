@@ -24,12 +24,10 @@ from .export import build_workbook
 from .importer import build_dataframe, clean_hal_name, load_excel_bytes, new_special_row
 from .placement import Booking, compute_plan, overlaps, try_place, try_place_fixed
 from .rules import (
-    auto_er_barn,
     classify_type,
     gang_tid,
     opvarmning_minutter,
     priority_rank,
-    read_er_barn,
     read_holdtype,
 )
 from .serialize import problem_message, to_row_dicts, to_schedule

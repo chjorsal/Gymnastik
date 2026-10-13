@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from .config import FLEX_BARN, MAX_EARLY_MIN, SKIFTE_I_SLOTTET_MIN, SKIFTE_MIN, STEP_MIN
+from .config import MAX_EARLY_MIN, SKIFTE_I_SLOTTET_MIN, SKIFTE_MIN, STEP_MIN
 from .rules import gang_tid, opvarmning_minutter, priority_rank
 from .values import override_int, override_str, parse_clock
 
@@ -114,10 +114,7 @@ def compute_plan(
     if df_plan.empty:
         return df_all
 
-    df_plan["_prio"] = df_plan.apply(
-        lambda r: priority_rank(r["Holdtype"], r["AntalPersoner"], r["ErBarn"]),
-        axis=1
-    )
+    df_plan["_prio"] = df_plan["Holdtype"].apply(priority_rank)
     df_plan = df_plan.sort_values(["_prio", "OpvisningStart"])
 
     bookings: Dict[str, List[Booking]] = {}
@@ -130,7 +127,7 @@ def compute_plan(
         override = override_int(row["OpvarmningMinOverride"])
         if override is not None:
             return override
-        return opvarmning_minutter(row["Holdtype"], row["ErBarn"])
+        return opvarmning_minutter(row["Holdtype"])
 
     def hal_override_for(row) -> Optional[str]:
         """Manuel hal-tildeling sat af brugeren — hvis den peger på en
@@ -166,12 +163,11 @@ def compute_plan(
             halls_to_try = halls_prio_first
         else:
             halls_to_try = warmup_halls
-        skifte = 0 if r["ErBarn"] else SKIFTE_I_SLOTTET_MIN
-        placed = try_place_fixed(bookings, halls_to_try, warm_min, fixed_start, skifte)
+        placed = try_place_fixed(bookings, halls_to_try, warm_min, fixed_start, SKIFTE_I_SLOTTET_MIN)
         # Et fast tidspunkt der slutter efter holdet skal gå til opvisning
         # (fx efter en senere omrokering af programmet) er ugyldigt — vis det
         # som et problem i stedet for stille at melde "OK".
-        latest_end = r["OpvisningStart"] - timedelta(minutes=gang_tid(r["Holdtype"], r["ErBarn"]))
+        latest_end = r["OpvisningStart"] - timedelta(minutes=gang_tid())
         if placed and placed[2] > latest_end:
             placed = None
         results[rid] = _book(bookings, r["Hold"], placed)
@@ -181,7 +177,7 @@ def compute_plan(
     for _, r in eft_rows.iterrows():
         rid = r["id"]
         warm_min = warm_min_for(r)
-        walk_min = gang_tid("efterskole", False)
+        walk_min = gang_tid()
         pinned_hal = hal_override_for(r)
         if pinned_hal:
             placed = try_place(bookings, [pinned_hal], warm_min, r["OpvisningStart"], walk_min, 0, 30)
@@ -194,20 +190,17 @@ def compute_plan(
     non_eft_plan = df_plan[(df_plan["Holdtype"] != "efterskole") & ~has_start_override]
     for _, r in non_eft_plan.iterrows():
         rid = r["id"]
-        holdtype = r["Holdtype"]
-        er_barn = r["ErBarn"]
-
         warm_min = warm_min_for(r)
-        walk_min = gang_tid(holdtype, er_barn)
-        skifte = 0 if er_barn else SKIFTE_I_SLOTTET_MIN
-        max_early = FLEX_BARN if er_barn else MAX_EARLY_MIN
+        walk_min = gang_tid()
+        skifte = SKIFTE_I_SLOTTET_MIN
+        max_early = MAX_EARLY_MIN
 
         pinned_hal = hal_override_for(r)
         halls_to_try = [pinned_hal] if pinned_hal else warmup_halls
         placed = try_place(bookings, halls_to_try, warm_min, r["OpvisningStart"], walk_min, skifte, max_early)
 
         if not placed:
-            fallback_extra = FLEX_BARN if er_barn else 20
+            fallback_extra = 20
             placed = try_place(bookings, halls_to_try, warm_min, r["OpvisningStart"], walk_min, skifte, max_early + fallback_extra)
 
         results[rid] = _book(bookings, r["Hold"], placed)

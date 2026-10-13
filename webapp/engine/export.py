@@ -9,11 +9,11 @@ from openpyxl.styles import Font, PatternFill
 from .values import fmt_time
 
 EXPORT_COLS = [
-    "Hold", "Type", "Varighed", "AntalPersoner", "Holdtype", "Alder",
+    "Hold", "Type", "Varighed", "AntalPersoner", "Holdtype",
     "OpvisningHal", "OpvisningTid",
     "OpvarmningHal", "OpvarmningStartTid", "OpvarmningSlutTid", "Status",
 ]
-HAL_COLS = ["OpvarmningStartTid", "OpvarmningSlutTid", "Hold", "Holdtype", "Alder", "OpvisningHal", "OpvisningTid"]
+HAL_COLS = ["OpvarmningStartTid", "OpvarmningSlutTid", "Hold", "Holdtype", "OpvisningHal", "OpvisningTid"]
 
 
 def _fill(color: str) -> PatternFill:
@@ -92,7 +92,6 @@ def build_workbook(df_all: pd.DataFrame, show_halls: Optional[List[str]] = None)
     out["OpvisningTid"] = out["OpvisningStart"].apply(fmt_time)
     out["OpvarmningStartTid"] = out["OpvarmningStart"].apply(fmt_time)
     out["OpvarmningSlutTid"] = out["OpvarmningSlut"].apply(fmt_time)
-    out["Alder"] = out["ErBarn"].apply(lambda b: "Barn" if b else "Voksen")
 
     export_cols = [c for c in EXPORT_COLS if c in out.columns]
     hal_cols = [c for c in HAL_COLS if c in out.columns]

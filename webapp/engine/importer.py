@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 import pandas as pd
 
 from .config import DEFAULT_VARIGHED, TYPE_LABELS
-from .rules import auto_er_barn, classify_type, read_er_barn, read_holdtype
+from .rules import classify_type, read_holdtype
 from .values import _clean_str, _none_if_nan, new_id, parse_clock
 
 
@@ -120,7 +120,7 @@ def new_special_row(show_hal: str, row_type: str, order: int, varighed: Optional
 
 def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFrame:
     columns = [
-        "id", "Hold", "Type", "AntalPersoner", "Holdtype", "ErBarn",
+        "id", "Hold", "Type", "AntalPersoner", "Holdtype",
         "OpvisningHal", "Varighed", "OpvisningStart", "OpvarmningMinOverride",
         "OpvarmningHalOverride", "OpvarmningStartOverride", "Order", "Manual", "_ignored",
     ]
@@ -148,15 +148,6 @@ def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFram
         df["Hold"].fillna("").str.contains("DGI", na=False)
     )
     df.loc[dgi_mask, "Holdtype"] = "dgi"
-
-    def resolve_er_barn(row) -> bool:
-        explicit = read_er_barn(row["AlderRaw"])
-        if explicit is not None:
-            return explicit
-        return auto_er_barn(row["Hold"])
-
-    df["ErBarn"] = df.apply(resolve_er_barn, axis=1)
-    df.loc[df["Holdtype"] == "efterskole", "ErBarn"] = False
 
     df["Varighed"] = pd.to_numeric(df["Varighed"], errors="coerce").fillna(10).astype(int).clip(lower=0)
     df["Order"] = pd.to_numeric(df["Order"], errors="coerce").fillna(0).astype(int)
