@@ -39,6 +39,7 @@ def to_row_dicts(df: pd.DataFrame, warmup_halls: List[str]) -> List[dict]:
             "type": r["Type"],
             "needsWarmup": r["Type"] == "hold",
             "manual": bool(r.get("Manual", False)),
+            "holdtype": r["Holdtype"],
             "opvisningHal": r["OpvisningHal"],
             "varighed": int(r["Varighed"]),
             "order": int(r["Order"]),

@@ -95,6 +95,10 @@ class TeamCreate(BaseModel):
     name: str
 
 
+class WarmupMinutes(BaseModel):
+    changes: List[dict]
+
+
 class RowsMove(BaseModel):
     ids: List[str]
     hal: str
@@ -177,6 +181,16 @@ def add_team(payload: TeamCreate):
 @app.post("/api/rows/{row_id}/place")
 def place_warmup(row_id: str, payload: PlaceWarmup):
     return run_action(actions.place_warmup, row_id, payload.hal, payload.start)
+
+
+@app.get("/api/solve")
+def solve():
+    return actions.solve_warmups(STATE)
+
+
+@app.post("/api/warmup-minutes")
+def apply_warmup_minutes(payload: WarmupMinutes):
+    return run_action(actions.apply_warmup_minutes, payload.changes)
 
 
 @app.get("/api/suggestions")

@@ -501,6 +501,22 @@ def run():
     check("efterskole is placed first", engine.priority_rank("efterskole") < engine.priority_rank("spring"))
 
     # ============================================================
+    # et hold må højst være færdigt 25 min før gangtiden (30 min før opvisning)
+    # ============================================================
+    dense = [
+        {"id": f"d{i}", "Hold": f"Hold {i}", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
+         "AlderRaw": None, "OpvisningHal": "Sal", "Varighed": 6, "OpvarmningMinOverride": None,
+         "OpvarmningHalOverride": None, "Order": i}
+        for i in range(12)
+    ]
+    dplan = engine.compute_plan(engine.build_dataframe(dense, [{"name": "Sal", "startTime": "09:00"}]), ["Hal A"], "Hal A")
+    ok = dplan[dplan["Status"] == "OK"]
+    waits = [int((r["OpvisningStart"] - timedelta(minutes=5) - r["OpvarmningSlut"]).total_seconds() // 60) for _, r in ok.iterrows()]
+    check("no team finishes warm-up more than 25 min before its walk", waits and max(waits) <= 25, waits)
+    check("teams may still wait up to 25 min to use a gap", max(waits) > 10, waits)
+    check("config: 25 min total early limit", engine.MAX_EARLY_TOTAL_MIN == 25)
+
+    # ============================================================
     # summary
     # ============================================================
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

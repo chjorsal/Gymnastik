@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=40">
+<link rel="stylesheet" href="style.css?v=41">
 </head>
 <body>
 <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -130,7 +130,12 @@
         <button id="overnight-banner" type="button" class="problem-banner hidden"></button>
 
         <section id="suggestions" class="hall-section hidden">
-          <h2 class="section-title">Forslag til hold uden plads</h2>
+          <div class="section-head">
+            <h2 class="section-title">Forslag til hold uden plads</h2>
+            <button id="btn-solve" type="button" class="btn btn-sm btn-primary"
+                    title="Forkort holdet og holdene omkring det (ned til 10 min, aldrig efterskoler)">Find løsning</button>
+          </div>
+          <div id="solve-result" class="solve-result hidden"></div>
           <ul id="suggestion-list" class="hall-rows"></ul>
         </section>
 
@@ -307,7 +312,7 @@
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
-<script src="api.js?v=5"></script>
-<script src="app.js?v=44"></script>
+<script src="api.js?v=6"></script>
+<script src="app.js?v=45"></script>
 </body>
 </html>

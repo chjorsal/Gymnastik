@@ -247,6 +247,11 @@ body { background: var(--chalk); -webkit-font-smoothing: antialiased; }
 .suggestion-text { flex: 1; }
 .suggestion-text strong { font-weight: 600; }
 .suggestion-none { color: var(--slate); }
+.solve-result { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; }
+.solve-result p { margin: 0 0 8px; }
+.solve-result ul { margin: 0 0 12px; padding-left: 18px; }
+.solve-result li { font-variant-numeric: tabular-nums; }
+.solve-actions { display: flex; gap: 8px; }
 
 /* ---------- Faner ---------- */
 
