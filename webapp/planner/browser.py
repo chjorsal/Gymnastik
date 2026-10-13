@@ -14,7 +14,7 @@ from . import actions
 # De handlinger call() må køre. Navnene og argumenterne svarer til
 # funktionerne i planner.actions.
 ACTIONS = {
-    "patch_row", "delete_row", "add_special_row", "add_team", "reorder_rows", "swap_warmup_time",
+    "patch_row", "delete_row", "add_special_row", "add_team", "place_warmup", "reorder_rows", "swap_warmup_time",
     "reset_rows", "create_warmup_hall", "rename_warmup_hall", "delete_warmup_hall",
     "set_priority_hall", "create_show_hall", "rename_show_hall",
     "set_show_hall_start_time", "delete_show_hall",
@@ -77,3 +77,8 @@ def import_plan(text: str) -> str:
         return _dump({"ok": True, "plan": actions.import_plan(text)})
     except actions.ActionError as e:
         return _error(e)
+
+
+def suggestions(plan_json: str) -> str:
+    """Forslag om kortere opvarmning (ned til 10 min) — ændrer intet."""
+    return _dump(actions.suggest_warmups(_plan(plan_json)))

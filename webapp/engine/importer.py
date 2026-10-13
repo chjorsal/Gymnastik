@@ -133,7 +133,7 @@ def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFram
     if "OpvarmningStartOverride" not in df.columns:
         df["OpvarmningStartOverride"] = None
     # Manual: hold tilføjet i hånden (ikke fra Excel) — navnet kan rettes
-    df["Manual"] = df["Manual"].fillna(False).astype(bool) if "Manual" in df.columns else False
+    df["Manual"] = df["Manual"].eq(True) if "Manual" in df.columns else False
 
     df["Holdtype"] = df["HoldtypeRaw"].apply(read_holdtype)
 

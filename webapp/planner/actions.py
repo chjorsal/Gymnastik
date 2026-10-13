@@ -345,6 +345,67 @@ def swap_warmup_time(plan: dict, dragged_id: str, target_id: str) -> None:
         )
 
 
+def _views(plan: dict) -> dict:
+    return {r["id"]: r for r in engine.to_row_dicts(_compute(plan), plan["warmup_halls"])}
+
+
+def _ok_ids(views: dict) -> set:
+    return {rid for rid, r in views.items() if r["status"] == "OK"}
+
+
+def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
+    """Lægger et holds opvarmning fast i en bestemt hal og et bestemt
+    tidspunkt (træk-og-slip på tidslinjen). Afvises, hvis holdet så ikke kan
+    nå sin opvisning, eller hvis det skubber et andet hold ud."""
+    row = _find_row(plan, row_id)
+    if row is None:
+        raise ActionError("Hold ikke fundet", 404)
+    if hal not in plan["warmup_halls"]:
+        raise ActionError("Opvarmningshal ikke fundet")
+    start_n = normalize_hhmm(start)
+    if start_n is None:
+        raise ActionError(f"'{start}' er ikke et gyldigt klokkeslæt — skriv fx 09:30")
+
+    ok_before = _ok_ids(_views(plan)) - {row_id}
+    before = (row.get("OpvarmningHalOverride"), row.get("OpvarmningStartOverride"))
+    row["OpvarmningHalOverride"], row["OpvarmningStartOverride"] = hal, start_n
+    after = _views(plan)
+    if after[row_id]["status"] != "OK" or not ok_before <= _ok_ids(after):
+        row["OpvarmningHalOverride"], row["OpvarmningStartOverride"] = before
+        raise ActionError(
+            f"Der er ikke plads til '{row['Hold']}' i {hal} kl. {start_n} — tiden overlapper "
+            "et andet hold, eller holdet når ikke sin opvisning"
+        )
+
+
+SUGGEST_MIN_MINUTES = 10   # kortere opvarmning end dette foreslås aldrig
+SUGGEST_MAX_TEAMS = 10     # begræns beregningen, hvis rigtig mange hold mangler plads
+
+
+def suggest_warmups(plan: dict) -> List[dict]:
+    """For hvert hold uden plads: den længste opvarmning ned til 10 min, der
+    giver plads uden at skubbe andre hold ud. Ændrer ikke planen."""
+    views = _views(plan)
+    ok_before = _ok_ids(views)
+    unplaced = [r for r in views.values() if r["needsWarmup"] and r["status"] == "KAN IKKE PLANLÆGGES"]
+    suggestions = []
+    for u in unplaced[:SUGGEST_MAX_TEAMS]:
+        current = u["opvarmningMinOverride"] if u["opvarmningMinOverride"] is not None else u["opvarmningMinDefault"]
+        for minutes in range(current - 1, SUGGEST_MIN_MINUTES - 1, -1):
+            trial = copy.deepcopy(plan)
+            _find_row(trial, u["id"])["OpvarmningMinOverride"] = minutes
+            after = _views(trial)
+            r = after[u["id"]]
+            if r["status"] == "OK" and ok_before <= _ok_ids(after):
+                suggestions.append({
+                    "id": u["id"], "hold": u["hold"], "minutes": minutes,
+                    "hal": r["opvarmningHalBeregnet"], "start": r["opvarmningStart"], "end": r["opvarmningSlut"],
+                    "opvisningHal": u["opvisningHal"], "opvisningTid": u["opvisningTid"],
+                })
+                break
+    return suggestions
+
+
 def reset_rows(plan: dict) -> None:
     plan["raw_rows"] = []
 
