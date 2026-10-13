@@ -360,6 +360,8 @@ def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
     row = _find_row(plan, row_id)
     if row is None:
         raise ActionError("Hold ikke fundet", 404)
+    if row.get("Type") != "hold":
+        raise ActionError("Kun hold har opvarmning — pauser og andre programpunkter kan ikke placeres")
     if hal not in plan["warmup_halls"]:
         raise ActionError("Opvarmningshal ikke fundet")
     start_n = normalize_hhmm(start)

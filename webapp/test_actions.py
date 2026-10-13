@@ -216,6 +216,43 @@ def run():
     f = {r["hold"]: r for r in actions.payload(plan_s2)["rows"]}["F"]
     check("using the suggestion places the team as promised", (f["status"], f["opvarmningStart"]) == ("OK", "09:43"), f)
 
+    # ---------- kanttilfælde ----------
+    plan_e = actions.new_plan()
+    actions.create_warmup_hall(plan_e, "V1")
+    actions.create_show_hall(plan_e, "Sal")
+    actions.upload(plan_e, [("d.xlsx", excel_bytes([("A", 30), ("B", 30)]))], show_hal="Sal")
+    actions.add_special_row(plan_e, "Sal", "pause")
+    pause_id = plan_e["raw_rows"][-1]["id"]
+    err = raises(lambda: actions.place_warmup(plan_e, pause_id, "V1", "08:00"), 400)
+    check("a pause cannot be given a warm-up", err is not None and "Kun hold" in err.message, err and err.message)
+    check("place_warmup rejects 24:00", raises(lambda: actions.place_warmup(plan_e, plan_e["raw_rows"][0]["id"], "V1", "24:00"), 400) is not None)
+    a_id = plan_e["raw_rows"][0]["id"]
+    actions.place_warmup(plan_e, a_id, "V1", "08:00")
+    va = {r["id"]: r for r in actions.payload(plan_e)["rows"]}[a_id]
+    check("an already placed team can be moved to a free slot", (va["opvarmningStart"], va["status"]) == ("08:00", "OK"), va)
+
+    plan_n = actions.new_plan()
+    actions.create_show_hall(plan_n, "Sal")
+    actions.upload(plan_n, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal")
+    check("no warm-up halls -> no suggestions (nothing to place in)", actions.suggest_warmups(plan_n) == [])
+    check("place_warmup without warm-up halls is refused",
+          raises(lambda: actions.place_warmup(plan_n, plan_n["raw_rows"][0]["id"], "V1", "08:00"), 400) is not None)
+
+    plan_10 = actions.new_plan()
+    actions.create_warmup_hall(plan_10, "V1")
+    actions.create_show_hall(plan_10, "Sal")
+    actions.upload(plan_10, [("d.xlsx", excel_bytes([(c, 12) for c in "ABCDEF"]))], show_hal="Sal")
+    for r in plan_10["raw_rows"]:
+        if r["Hold"] == "F":
+            r["OpvarmningMinOverride"] = 10
+    check("a team already at 10 min gets no suggestion", all(x["hold"] != "F" for x in actions.suggest_warmups(plan_10)))
+
+    weird = '<script>alert("x")</script> Ø-hold & co'
+    actions.add_team(plan_e, "Sal", weird)
+    check("team names with HTML/special characters are stored as plain text", plan_e["raw_rows"][-1]["Hold"] == weird)
+    check("very long team name is accepted and exported",
+          actions.add_team(plan_e, "Sal", "X" * 300) is None and pd.read_excel(BytesIO(actions.export_xlsx(plan_e)), sheet_name=None) is not None)
+
     # ---------- bytte opvarmningstid ----------
     check("swap with unknown team -> 404",
           raises(lambda: actions.swap_warmup_time(plan, "x", r2["id"]), 404) is not None)

@@ -96,7 +96,7 @@ body { background: var(--chalk); -webkit-font-smoothing: antialiased; }
   background: var(--surface);
   border-right: 1px solid var(--line);
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .brand-mark {
   display: inline-flex; align-items: center; justify-content: center;
   width: 32px; height: 32px; border-radius: 8px;
@@ -227,7 +227,8 @@ body { background: var(--chalk); -webkit-font-smoothing: antialiased; }
 .tl-block:hover, .tl-block:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 1; }
 .tl-block.pinned { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.3) 0 3px, transparent 3px 7px); }
 .tl-lane-problem .tl-lane-name { color: var(--signal); }
-.tl-block.problem { background: var(--signal); }
+.tl-block.problem { background: var(--signal); cursor: grab; }
+.tl-lane .tl-track.drag-over { background-color: var(--mat-soft); }
 
 .show-halls .section-title { margin-bottom: 8px; }
 .hall-rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
@@ -242,6 +243,10 @@ body { background: var(--chalk); -webkit-font-smoothing: antialiased; }
 .hall-row-time, .hall-row-count { color: var(--slate); }
 .hall-row-problem { color: var(--signal); font-weight: 600; }
 .hall-row-open { color: var(--mat); font-weight: 500; }
+.suggestion { display: flex; align-items: center; gap: 16px; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.suggestion-text { flex: 1; }
+.suggestion-text strong { font-weight: 600; }
+.suggestion-none { color: var(--slate); }
 
 /* ---------- Faner ---------- */
 
@@ -291,6 +296,8 @@ td.narrow-col .form-select.cell-input { min-width: 136px; }
 tr:hover .cell-input.form-control, tr:hover .cell-input.form-select,
 .cell-input.form-control:focus, .cell-input.form-select:focus { border-color: var(--line); background-color: var(--surface); }
 td.readonly { color: var(--slate); }
+td.warmup-col { white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.warmup-missing { color: var(--signal); font-weight: 600; }
 
 tr.dragging { opacity: 0.4; }
 tr.drag-over > td { background: var(--mat-soft) !important; }

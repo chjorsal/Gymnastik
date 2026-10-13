@@ -79,6 +79,14 @@ def common_flow(page, url, xlsx, dialogs, errors):
         page.fill("#onb-warmup-form input", name)
         page.press("#onb-warmup-form input", "Enter")
         page.wait_for_function(f"document.querySelectorAll('#onb-warmup-list li').length === {i}")
+    check("første opvarmningshal er prioritetshal fra start",
+          page.evaluate("() => STATE.priorityHall") == "Varm 1"
+          and "Prioritetshal" in page.locator("#onb-warmup-list li").first.inner_text())
+    page.locator("#onb-warmup-list li").nth(1).locator(".star").click()
+    page.wait_for_function("() => STATE.priorityHall === 'Varm 2'")
+    check("stjernen gør en anden hal til prioritetshal", "Prioritetshal" in page.locator("#onb-warmup-list li").nth(1).inner_text())
+    page.locator("#onb-warmup-list li").first.locator(".star").click()
+    page.wait_for_function("() => STATE.priorityHall === 'Varm 1'")
     for i, (name, start) in enumerate([("Sal A", "9.15"), ("Sal B", "10:00")], start=1):
         page.fill("#onb-show-form input >> nth=0", name)
         page.fill("#onb-show-form input >> nth=1", start)
@@ -229,6 +237,101 @@ def browser_only(browser, context, page, url, dialogs):
     check("Åbn plan indlæser en gemt plan", True)
 
 
+def refresh(page):
+    page.evaluate("async () => { STATE = await apiGet('/api/state'); render(); }")
+
+
+def api(page, method, url, body=None):
+    page.evaluate("([m, u, b]) => Api.request(m, u, b)", [method, url, body])
+
+
+def new_features(page, tmp, dialogs):
+    """Punkt 3-7: logo, piletaster, opvarmning i Program, forslag og træk-og-slip."""
+    # 7: logoet går til Oversigt
+    page.click(".rail-link[data-view=program]")
+    page.click("#brand-home")
+    check("logoet går til Oversigt", page.inner_text("#page-title") == "Oversigt")
+
+    # 5: Program viser, hvor og hvornår holdet varmer op
+    page.click(".rail-link[data-view=program]")
+    cells = page.locator("#table-body tr:not(.row-special) td.warmup-col").all_inner_texts()
+    import re as _re
+    check("Program viser opvarmningshal og tid for hvert hold",
+          cells and all(_re.match(r"^.+ \d\d:\d\d–\d\d:\d\d$", c) or c == "Mangler plads" for c in cells), cells)
+    page.click(".add-special[data-type=pause]")
+    page.wait_for_selector("#table-body tr.row-special")
+    special = page.locator("#table-body tr.row-special td.warmup-col").first.inner_text()
+    check("specialpunkter viser — i stedet for opvarmning", special == "—", special)
+
+    # 4: opvarmningsfeltet viser tiden, og pil op tæller fra den
+    warm = page.locator("#table-body tr:not(.row-special) td.narrow-col input[type=number]").nth(1)
+    check("opvarmningsfeltet viser 15 og er ikke tomt", warm.input_value() == "15", warm.input_value())
+    team_id = page.locator("#table-body tr:not(.row-special)").nth(1).get_attribute("data-id")
+    sel = f"#table-body tr[data-id='{team_id}'] td.narrow-col input[type=number] >> nth=1"
+    page.locator(sel).focus()
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("ArrowUp")
+    check("pil op tæller fra 15 (giver 17, ikke 2)", page.locator(sel).input_value() == "17", page.locator(sel).input_value())
+    page.keyboard.press("Tab")
+    page.wait_for_function(f"() => STATE.rows.find(r => r.id === '{team_id}').opvarmningMinOverride === 17")
+    check("værdien gemmes, når feltet forlades", True)
+    page.locator(sel).focus()
+    for _ in range(2):
+        page.keyboard.press("ArrowDown")
+    page.keyboard.press("Tab")
+    page.wait_for_function(f"() => STATE.rows.find(r => r.id === '{team_id}').opvarmningMinOverride === 15")
+    check("pil ned tæller ned igen", True)
+
+    # 6 + 3: scenarie med én opvarmningshal og et hold hvert 12. minut
+    api(page, "POST", "/api/reset")
+    api(page, "DELETE", "/api/halls/warmup", {"name": "Varm 2"})
+    api(page, "POST", "/api/halls/show/starttime", {"name": "Sal A", "startTime": "09:00"})
+    refresh(page)
+    df = pd.DataFrame({"Tid": ["09:00"] + [""] * 5, "Varighed": [12] * 6, "Holdnavn": list("ABCDEF"),
+                       "Antal deltagere": [20] * 6})
+    path = Path(tmp) / "tolv.xlsx"
+    df.to_excel(path, index=False)
+    page.set_input_files("#file-input", str(path))
+    page.wait_for_function("() => STATE.rows.length === 6")
+    page.click(".rail-link[data-view=oversigt]")
+    unplaced = page.evaluate("() => STATE.rows.filter(r => r.status !== 'OK').map(r => r.hold)")
+    check("scenarie: D og F mangler plads", unplaced == ["D", "F"], unplaced)
+
+    page.wait_for_selector("#suggestion-list .btn-primary", timeout=60_000)
+    lines = page.locator("#suggestion-list li").all_inner_texts()
+    check("forslag: F med 12 min i Varm 1 09:43–09:55",
+          any(l.startswith("F") and "12 min" in l and "Varm 1 09:43–09:55" in l for l in lines), lines)
+    check("D får besked om, at der ikke er plads selv med 10 min",
+          any(l.startswith("D") and "10 min" in l and "Brug forslag" not in l for l in lines), lines)
+    page.locator("#suggestion-list li", has_text="F (går på").locator(".btn-primary").click()
+    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'F').status === 'OK'")
+    f = page.evaluate("() => STATE.rows.find(r => r.hold === 'F')")
+    check("Brug forslag giver F 12 min og plads", (f["opvarmningMinOverride"], f["opvarmningStart"]) == (12, "09:43"), f)
+    page.wait_for_function("() => !document.querySelector('#suggestion-list').innerText.includes('Beregner')")
+    lines = page.locator("#suggestion-list li").all_inner_texts()
+    check("forslagene beregnes forfra efter en ændring", len(lines) == 1 and lines[0].startswith("D"), lines)
+
+    # 3: træk D ind i et hul på tidslinjen
+    tl = page.evaluate("() => { const d = document.getElementById('timeline').dataset;"
+                       " return {from: +d.from, span: +d.span, w: +d.trackW}; }")
+    x_at = lambda hhmm: (int(hhmm[:2]) * 60 + int(hhmm[3:]) - tl["from"]) / tl["span"] * tl["w"] + 2
+    red = page.locator(".tl-lane-problem .tl-block").first
+    lane = page.locator(".tl-lane", has=page.locator(".tl-lane-name", has_text="Varm 1")).locator(".tl-track")
+    before = len(dialogs)
+    red.drag_to(lane, target_position={"x": x_at("08:30"), "y": 20})
+    page.wait_for_timeout(800)
+    d = page.evaluate("() => STATE.rows.find(r => r.hold === 'D')")
+    check("træk til en optaget tid afvises med besked, D uændret",
+          len(dialogs) > before and "ikke plads" in dialogs[-1] and d["status"] != "OK", dialogs[-1:])
+    red = page.locator(".tl-lane-problem .tl-block").first
+    red.drag_to(lane, target_position={"x": x_at("08:05"), "y": 20})
+    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'D').status === 'OK'")
+    d = page.evaluate("() => STATE.rows.find(r => r.hold === 'D')")
+    check("træk D til et hul giver opvarmning der (08:05)", (d["opvarmningHalBeregnet"], d["opvarmningStart"]) == ("Varm 1", "08:05"), d)
+    check("ingen hold uden plads -> ingen forslag og ingen rød række",
+          page.is_hidden("#suggestions") and page.locator(".tl-lane-problem").count() == 0)
+
+
 def run(mode):
     tmp = tempfile.mkdtemp()
     xlsx = excel_file(tmp)
@@ -257,6 +360,7 @@ def run(mode):
                                          d.accept("Sent hold") if d.type == "prompt" else d.accept()))
             page.on("pageerror", lambda e: errors.append(str(e)))
             common_flow(page, url, xlsx, dialogs, errors)
+            new_features(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))
             check("ingen JavaScript-fejl", not errors, errors)

@@ -154,6 +154,7 @@ async function init() {
     btn.addEventListener("click", () => setView(btn.dataset.view));
   });
   document.getElementById("btn-reset").addEventListener("click", onReset);
+  document.getElementById("brand-home").addEventListener("click", () => setView("oversigt"));
   let resizeTimer;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
@@ -324,6 +325,10 @@ function unplacedRows() {
 }
 
 function render() {
+  // Bevar fokus i et redigerbart felt, når listen tegnes forfra (fx efter at
+  // en ændring er gemt), så man kan blive ved med at taste/bruge piletasterne.
+  const focusKey = document.activeElement && document.activeElement.dataset
+    ? document.activeElement.dataset.focusKey : null;
   renderHalls();
   renderNav();
   renderPageHead();
@@ -341,6 +346,10 @@ function render() {
     renderWarmupHalTabs();
     renderUnplacedWarmup();
     renderWarmupTable();
+  }
+  if (focusKey) {
+    const again = document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
+    if (again) again.focus();
   }
 }
 
@@ -413,6 +422,7 @@ function renderOverview() {
 
   renderProblemBanner();
   renderOvernightBanner();
+  renderSuggestions();
   renderTimeline(teams);
   renderShowHallSummary();
 }
@@ -462,11 +472,23 @@ function renderOnboarding() {
 
   const warmupList = document.getElementById("onb-warmup-list");
   warmupList.replaceChildren(...STATE.warmupHalls.map((name) => {
-    const extra = [];
-    if (name === STATE.priorityHall && STATE.warmupHalls.length > 1) {
+    const isPrio = name === STATE.priorityHall;
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = "star icon-btn" + (isPrio ? " active" : "");
+    star.title = isPrio ? "Prioritetshal: efterskoler varmer op her først" : "Gør til prioritetshal";
+    star.setAttribute("aria-pressed", String(isPrio));
+    star.setAttribute("aria-label", `Prioritetshal: ${name}`);
+    star.appendChild(icon(isPrio ? "starFilled" : "starOutline"));
+    star.addEventListener("click", async () => {
+      STATE = await apiJSON("/api/halls/warmup/priority", "POST", { name });
+      render();
+    });
+    const extra = [star];
+    if (isPrio) {
       const prio = document.createElement("span");
       prio.className = "prio";
-      prio.textContent = "Fyldes først";
+      prio.textContent = "Prioritetshal";
       extra.push(prio);
     }
     extra.push(removeButton(`Fjern ${name}`, () => apiJSON("/api/halls/warmup", "DELETE", { name })));
@@ -508,6 +530,59 @@ function renderOvernightBanner() {
   action.textContent = "Åbn program";
   banner.appendChild(action);
   banner.onclick = () => { activeHal = late[0].name; saveActiveHal(); setView("program"); };
+}
+
+// Forslag beregnes kun her og kun når der er hold uden plads, fordi hvert
+// forslag kræver flere genberegninger af planen.
+let suggestionToken = 0;
+
+async function renderSuggestions() {
+  const section = document.getElementById("suggestions");
+  const list = document.getElementById("suggestion-list");
+  const unplaced = unplacedRows();
+  section.classList.toggle("hidden", unplaced.length === 0);
+  if (!unplaced.length) return;
+
+  const token = ++suggestionToken;
+  list.replaceChildren(suggestionLine("Beregner forslag …"));
+  let suggestions;
+  try {
+    suggestions = await Api.request("GET", "/api/suggestions");
+  } catch (e) {
+    suggestions = [];
+  }
+  if (token !== suggestionToken) return;   // planen er ændret i mellemtiden
+
+  const byId = new Map(suggestions.map((s) => [s.id, s]));
+  list.replaceChildren(...unplaced.map((r) => {
+    const s = byId.get(r.id);
+    if (!s) {
+      return suggestionLine(`${r.hold} (går på ${r.opvisningTid} i ${r.opvisningHal}): ingen plads, heller ikke med 10 min `
+        + "opvarmning. Flyt holdet i programmet, eller træk det ind på tidslinjen.", true);
+    }
+    const li = document.createElement("li");
+    li.className = "suggestion";
+    const text = document.createElement("span");
+    text.className = "suggestion-text";
+    const strong = document.createElement("strong");
+    strong.textContent = s.hold;
+    text.append(strong, document.createTextNode(
+      ` (går på ${s.opvisningTid} i ${s.opvisningHal}): med ${s.minutes} min opvarmning er der plads i ${s.hal} ${s.start}–${s.end}.`));
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-sm btn-primary";
+    btn.textContent = "Brug forslag";
+    btn.addEventListener("click", () => patchRow(s.id, "opvarmningMin", s.minutes));
+    li.append(text, btn);
+    return li;
+  }));
+}
+
+function suggestionLine(text, none) {
+  const li = document.createElement("li");
+  li.className = "suggestion" + (none ? " suggestion-none" : "");
+  li.textContent = text;
+  return li;
 }
 
 function renderProblemBanner() {
@@ -562,6 +637,11 @@ function renderTimeline(teams) {
   // Hele pixels i stedet for procenter, så kanter og linjer står skarpt.
   const trackW = Math.max(el.clientWidth - TL_LABEL_W, 600);
   const px = (min) => Math.round(((min - from) / span) * trackW);
+  // til træk-og-slip (og testen): pixel -> minut
+  el.dataset.from = from;
+  el.dataset.span = span;
+  el.dataset.trackW = trackW;
+  const minuteAt = (x) => Math.round((from + (x / trackW) * span) / 5) * 5;
 
   const gridLines = () => {
     const frag = document.createDocumentFragment();
@@ -588,7 +668,7 @@ function renderTimeline(teams) {
   axis.append(document.createElement("span"), axisTrack);
   el.appendChild(axis);
 
-  const addBlock = (track, { start, end, color, extraClass, title, onClick }) => {
+  const addBlock = (track, { start, end, color, extraClass, title, onClick, dragId }) => {
     const left = px(start);
     const block = document.createElement("button");
     block.type = "button";
@@ -599,6 +679,7 @@ function renderTimeline(teams) {
     block.title = title;
     block.setAttribute("aria-label", title.replaceAll("\n", ", "));
     block.addEventListener("click", onClick);
+    if (dragId) makeDragSource(block, dragId);
     track.appendChild(block);
   };
 
@@ -621,6 +702,19 @@ function renderTimeline(teams) {
   STATE.warmupHalls.forEach((hal) => {
     const open = () => { activeWarmupHal = hal; setView("opvarmning"); };
     const track = lane(hal, open);
+    // Slip et hold uden plads her: opvarmningen starter hvor det slippes
+    // (rundet til 5 min). Serveren afviser, hvis der ikke er plads.
+    track.addEventListener("dragover", (e) => { e.preventDefault(); track.classList.add("drag-over"); });
+    track.addEventListener("dragleave", () => track.classList.remove("drag-over"));
+    track.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      track.classList.remove("drag-over");
+      const id = e.dataTransfer.getData("text/plain");
+      if (!id) return;
+      const start = fmtMinutes(minuteAt(e.clientX - track.getBoundingClientRect().left));
+      STATE = await apiJSON(`/api/rows/${encodeURIComponent(id)}/place`, "POST", { hal, start });
+      render();
+    });
     placed.filter((r) => r.opvarmningHalBeregnet === hal).forEach((r) => {
       addBlock(track, {
         start: r.opvarmningStartMin,
@@ -640,8 +734,10 @@ function renderTimeline(teams) {
       addBlock(track, {
         start, end,
         extraClass: "problem",
-        title: `${r.hold}\nMangler plads til opvarmning\nGår på ${r.opvisningTid} i ${r.opvisningHal}`,
+        title: `${r.hold}\nMangler plads til opvarmning\nGår på ${r.opvisningTid} i ${r.opvisningHal}`
+          + "\nTræk holdet op i en hal for at give det en opvarmningstid",
         onClick: open,
+        dragId: r.id,
       });
     });
   }
@@ -818,9 +914,10 @@ function buildWarmInput(row) {
   warmInput.type = "number";
   warmInput.min = "0";
   warmInput.className = "form-control form-control-sm cell-input";
-  warmInput.placeholder = String(row.opvarmningMinDefault);
-  warmInput.value = row.opvarmningMinOverride === null || row.opvarmningMinOverride === undefined
-    ? "" : row.opvarmningMinOverride;
+  // Vis altid den tid, holdet faktisk får (fx 15), så piletasterne tæller
+  // derfra og ikke fra 0.
+  warmInput.value = row.opvarmningMinOverride ?? row.opvarmningMinDefault;
+  warmInput.dataset.focusKey = `warmup-view:${row.id}`;
   warmInput.addEventListener("change", () => patchRow(row.id, "opvarmningMin", warmInput.value));
   return warmInput;
 }
@@ -1071,6 +1168,7 @@ function renderTableBody(rows) {
     varighedInput.min = "0";
     varighedInput.className = "form-control form-control-sm cell-input";
     varighedInput.value = row.varighed;
+    varighedInput.dataset.focusKey = `program-dur:${row.id}`;
     varighedInput.addEventListener("change", () => patchRow(row.id, "varighed", varighedInput.value));
     tdVarighed.appendChild(varighedInput);
     tr.appendChild(tdVarighed);
@@ -1082,9 +1180,10 @@ function renderTableBody(rows) {
       warmInput.type = "number";
       warmInput.min = "0";
       warmInput.className = "form-control form-control-sm cell-input";
-      warmInput.placeholder = String(row.opvarmningMinDefault);
-      warmInput.value = row.opvarmningMinOverride === null || row.opvarmningMinOverride === undefined
-        ? "" : row.opvarmningMinOverride;
+      // Vis altid den tid, holdet faktisk får (fx 15), så piletasterne tæller
+      // derfra og ikke fra 0.
+      warmInput.value = row.opvarmningMinOverride ?? row.opvarmningMinDefault;
+      warmInput.dataset.focusKey = `program-warm:${row.id}`;
       warmInput.addEventListener("change", () => patchRow(row.id, "opvarmningMin", warmInput.value));
       tdWarm.appendChild(warmInput);
     } else {
@@ -1094,6 +1193,7 @@ function renderTableBody(rows) {
     tr.appendChild(tdWarm);
 
     tr.appendChild(readonlyCell(row.opvisningTid || "—", "narrow-col"));
+    tr.appendChild(warmupCell(row));
 
     const tdMoveHal = document.createElement("td");
     tdMoveHal.className = "narrow-col";
@@ -1125,6 +1225,23 @@ function renderTableBody(rows) {
 
     tbody.appendChild(tr);
   });
+}
+
+// Hvor og hvornår holdet varmer op — så alt om et hold står i én række.
+function warmupCell(row) {
+  const td = document.createElement("td");
+  td.className = "warmup-col";
+  if (!row.needsWarmup) {
+    td.className += " readonly";
+    td.textContent = "—";
+  } else if (row.status === "OK") {
+    td.className += " readonly";
+    td.textContent = `${row.opvarmningHalBeregnet} ${row.opvarmningStart}–${row.opvarmningSlut}`;
+  } else {
+    td.className += " warmup-missing";
+    td.textContent = "Mangler plads";
+  }
+  return td;
 }
 
 async function patchRow(id, field, value) {
