@@ -295,7 +295,7 @@ def new_features(page, tmp, dialogs):
     page.wait_for_function("() => STATE.rows.length === 6")
     page.click(".rail-link[data-view=oversigt]")
     unplaced = page.evaluate("() => STATE.rows.filter(r => r.status !== 'OK').map(r => r.hold)")
-    check("scenarie: D og F mangler plads", unplaced == ["D", "F"], unplaced)
+    check("scenarie: B, D og F mangler plads", unplaced == ["B", "D", "F"], unplaced)
 
     page.wait_for_selector("#suggestion-list .btn-primary", timeout=60_000)
     lines = page.locator("#suggestion-list li").all_inner_texts()
@@ -309,13 +309,14 @@ def new_features(page, tmp, dialogs):
     check("Brug forslag giver F 12 min og plads", (f["opvarmningMinOverride"], f["opvarmningStart"]) == (12, "09:43"), f)
     page.wait_for_function("() => !document.querySelector('#suggestion-list').innerText.includes('Beregner')")
     lines = page.locator("#suggestion-list li").all_inner_texts()
-    check("forslagene beregnes forfra efter en ændring", len(lines) == 1 and lines[0].startswith("D"), lines)
+    check("forslagene beregnes forfra efter en ændring",
+          [l[0] for l in lines] == ["B", "D"] and all("Brug forslag" not in l for l in lines), lines)
 
     # 3: træk D ind i et hul på tidslinjen
     tl = page.evaluate("() => { const d = document.getElementById('timeline').dataset;"
                        " return {from: +d.from, span: +d.span, w: +d.trackW}; }")
     x_at = lambda hhmm: (int(hhmm[:2]) * 60 + int(hhmm[3:]) - tl["from"]) / tl["span"] * tl["w"] + 2
-    red = page.locator(".tl-lane-problem .tl-block").first
+    red = page.locator(".tl-lane-problem .tl-block").nth(1)   # D (B er nr. 0)
     lane = page.locator(".tl-lane", has=page.locator(".tl-lane-name", has_text="Varm 1")).locator(".tl-track")
     before = len(dialogs)
     red.drag_to(lane, target_position={"x": x_at("08:30"), "y": 20})
@@ -323,11 +324,15 @@ def new_features(page, tmp, dialogs):
     d = page.evaluate("() => STATE.rows.find(r => r.hold === 'D')")
     check("træk til en optaget tid afvises med besked, D uændret",
           len(dialogs) > before and "ikke plads" in dialogs[-1] and d["status"] != "OK", dialogs[-1:])
-    red = page.locator(".tl-lane-problem .tl-block").first
+    red = page.locator(".tl-lane-problem .tl-block").nth(1)
     red.drag_to(lane, target_position={"x": x_at("08:05"), "y": 20})
     page.wait_for_function("() => STATE.rows.find(r => r.hold === 'D').status === 'OK'")
     d = page.evaluate("() => STATE.rows.find(r => r.hold === 'D')")
     check("træk D til et hul giver opvarmning der (08:05)", (d["opvarmningHalBeregnet"], d["opvarmningStart"]) == ("Varm 1", "08:05"), d)
+    tl = page.evaluate("() => { const d = document.getElementById('timeline').dataset;"
+                       " return {from: +d.from, span: +d.span, w: +d.trackW}; }")
+    page.locator(".tl-lane-problem .tl-block").first.drag_to(lane, target_position={"x": x_at("08:20"), "y": 20})
+    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'B').status === 'OK'")
     check("ingen hold uden plads -> ingen forslag og ingen rød række",
           page.is_hidden("#suggestions") and page.locator(".tl-lane-problem").count() == 0)
 
@@ -381,6 +386,48 @@ def bulk_tests(page, dialogs):
           and page.locator("#bulk-target option").all_inner_texts() == ["Ingen anden hal"])
 
 
+def solve_tests(page, tmp):
+    """Find løsning: forkort holdet og holdene omkring det, vis først, brug bagefter."""
+    api(page, "POST", "/api/reset")
+    refresh(page)
+    df = pd.DataFrame({"Tid": ["09:00"] + [""] * 5, "Varighed": [12] * 6, "Holdnavn": list("ABCDEF"),
+                       "Antal deltagere": [20] * 6})
+    path = Path(tmp) / "tolv2.xlsx"
+    df.to_excel(path, index=False)
+    page.set_input_files("#file-input", str(path))
+    page.wait_for_function("() => STATE.rows.length === 6")
+    page.click(".rail-link[data-view=oversigt]")
+    missing = lambda: page.evaluate("() => STATE.rows.filter(r => r.status !== 'OK').map(r => r.hold)")
+    before = missing()
+    check("scenarie til Find løsning: B, D og F mangler plads", before == ["B", "D", "F"], before)
+
+    page.click("#btn-solve")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    text = page.inner_text("#solve-result")
+    check("Find løsning viser hvilke hold der får plads og hvad der forkortes", "får plads" in text and "→" in text, text)
+    mins = [int(m) for m in __import__("re").findall(r"→ (\d+) min", text)]
+    check("løsningen går aldrig under 10 min", mins and min(mins) >= 10, mins)
+    page.click("#solve-result >> text=Annullér")
+    check("Annullér skjuler løsningen og ændrer intet", page.is_hidden("#solve-result") and missing() == before)
+
+    page.click("#btn-solve")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    api(page, "POST", "/api/rows/special", {"hal": "Sal A", "type": "pause"})
+    refresh(page)
+    check("et gammelt resultat forsvinder, når planen ændres", page.is_hidden("#solve-result"))
+    api(page, "DELETE", "/api/rows/" + page.evaluate("() => STATE.rows.find(r => r.type === 'pause').id"))
+    refresh(page)
+
+    page.click("#btn-solve")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    page.click("#solve-result >> text=Brug løsningen")
+    page.wait_for_function(f"() => STATE.rows.filter(r => r.status !== 'OK').length < {len(before)}")
+    after = missing()
+    check("Brug løsningen giver flere hold plads", len(after) < len(before), after)
+    check("ingen hold har fået under 10 min",
+          page.evaluate("() => STATE.rows.every(r => r.opvarmningMinOverride === null || r.opvarmningMinOverride >= 10)"))
+
+
 def run(mode):
     tmp = tempfile.mkdtemp()
     xlsx = excel_file(tmp)
@@ -411,6 +458,7 @@ def run(mode):
             common_flow(page, url, xlsx, dialogs, errors)
             new_features(page, tmp, dialogs)
             bulk_tests(page, dialogs)
+            solve_tests(page, tmp)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))
             check("ingen JavaScript-fejl", not errors, errors)

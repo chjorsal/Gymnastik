@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from .config import MAX_EARLY_MIN, SKIFTE_I_SLOTTET_MIN, SKIFTE_MIN, STEP_MIN
+from .config import MAX_EARLY_MIN, MAX_EARLY_TOTAL_MIN, SKIFTE_I_SLOTTET_MIN, SKIFTE_MIN, STEP_MIN
 from .rules import gang_tid, opvarmning_minutter, priority_rank
 from .values import override_int, override_str, parse_clock
 
@@ -180,7 +180,7 @@ def compute_plan(
         walk_min = gang_tid()
         pinned_hal = hal_override_for(r)
         if pinned_hal:
-            placed = try_place(bookings, [pinned_hal], warm_min, r["OpvisningStart"], walk_min, 0, 30)
+            placed = try_place(bookings, [pinned_hal], warm_min, r["OpvisningStart"], walk_min, 0, MAX_EARLY_TOTAL_MIN)
         else:
             placed = try_place(bookings, halls_prio_first, warm_min, r["OpvisningStart"], walk_min, 0, 15)
         results[rid] = _book(bookings, r["Hold"], placed)
@@ -200,8 +200,7 @@ def compute_plan(
         placed = try_place(bookings, halls_to_try, warm_min, r["OpvisningStart"], walk_min, skifte, max_early)
 
         if not placed:
-            fallback_extra = 20
-            placed = try_place(bookings, halls_to_try, warm_min, r["OpvisningStart"], walk_min, skifte, max_early + fallback_extra)
+            placed = try_place(bookings, halls_to_try, warm_min, r["OpvisningStart"], walk_min, skifte, MAX_EARLY_TOTAL_MIN)
 
         results[rid] = _book(bookings, r["Hold"], placed)
 

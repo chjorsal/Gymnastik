@@ -202,9 +202,10 @@ def run():
     actions.create_warmup_hall(plan_s2, "V1")
     actions.create_show_hall(plan_s2, "Sal")
     actions.upload(plan_s2, [("d.xlsx", excel_bytes([(c, 12) for c in "ABCDEF"]))], show_hal="Sal")
-    # én hal, et hold hvert 12. minut: D og F får ikke plads med 15 min
+    # én hal, et hold hvert 12. minut: B, D og F får ikke plads med 15 min
+    # (B ville skulle vente mere end 25 min)
     unplaced = [r["hold"] for r in actions.payload(plan_s2)["rows"] if r["status"] != "OK"]
-    check("scenario: D and F have no room with 15 min", unplaced == ["D", "F"], unplaced)
+    check("scenario: B, D and F have no room with 15 min", unplaced == ["B", "D", "F"], unplaced)
     before = copy.deepcopy(plan_s2)
     sug = actions.suggest_warmups(plan_s2)
     check("F gets the longest warm-up that fits (12 min)",
@@ -287,6 +288,52 @@ def run():
     res = json.loads(__import__("planner.browser", fromlist=["x"]).call(
         json.dumps(plan_b), "delete_rows", json.dumps({"row_ids": [ids["H6"]]})))
     check("browser bridge allows delete_rows", res["ok"] and len(res["plan"]["raw_rows"]) == 4, res.get("error"))
+
+    # ---------- find løsning: forkort holdet og holdene omkring det ----------
+    before = copy.deepcopy(plan_s2)
+    missing = [r["hold"] for r in actions.payload(plan_s2)["rows"] if r["status"] != "OK"]
+    sol = actions.solve_warmups(plan_s2)
+    check("solve does not change the plan", plan_s2 == before)
+    check("solve places at least one team without room", len(sol["placed"]) >= 1 and set(sol["placed"]) <= set(missing), sol)
+    check("every team without room is either placed or remaining", sorted(sol["placed"] + sol["remaining"]) == sorted(missing))
+    check("solve never goes below 10 min", all(c["to"] >= 10 for c in sol["changes"]), sol["changes"])
+    check("solve also shortens teams around the one without room",
+          any(c["hold"] not in missing for c in sol["changes"]), sol["changes"])
+    check("solve changes each team by at most 5 min", all(c["from"] - c["to"] <= 5 for c in sol["changes"]), sol["changes"])
+    ok_before = {r["hold"] for r in actions.payload(plan_s2)["rows"] if r["status"] == "OK"}
+    applied = copy.deepcopy(plan_s2)
+    actions.apply_warmup_minutes(applied, [{"id": c["id"], "minutes": c["to"]} for c in sol["changes"]])
+    view = {r["hold"]: r for r in actions.payload(applied)["rows"]}
+    check("applying the solution places exactly the promised teams",
+          {h for h in missing if view[h]["status"] == "OK"} == set(sol["placed"]), (sol["placed"], sol["remaining"]))
+    check("applying the solution keeps every team that already had room",
+          all(view[h]["status"] == "OK" for h in ok_before))
+    check("remaining lists the teams still without room",
+          sorted(sol["remaining"]) == sorted(h for h in missing if view[h]["status"] != "OK"))
+
+    plan_eft = actions.new_plan()
+    actions.create_warmup_hall(plan_eft, "V1")
+    actions.create_show_hall(plan_eft, "Sal")
+    actions.upload(plan_eft, [("d.xlsx", excel_bytes([("Testby Efterskole", 12), ("A", 12), ("B", 12), ("C", 12)]))],
+                   show_hal="Sal")
+    sol_e = actions.solve_warmups(plan_eft)
+    check("efterskoler are never shortened by solve", all("Efterskole" not in c["hold"] for c in sol_e["changes"]), sol_e)
+
+    plan_dgi = actions.new_plan()
+    actions.create_warmup_hall(plan_dgi, "V1")
+    actions.create_show_hall(plan_dgi, "Sal")
+    actions.upload(plan_dgi, [("d.xlsx", excel_bytes([("DGI Østjylland Rephold", 12), ("A", 12), ("B", 12), ("C", 12),
+                                                         ("DGI MiniMix", 12), ("D", 12)]))], show_hal="Sal")
+    sol_d = actions.solve_warmups(plan_dgi)
+    check("DGI teams are never shortened by solve", all("DGI" not in c["hold"] for c in sol_d["changes"]), sol_d["changes"])
+    check("DGI teams get no shorter-warm-up suggestion",
+          all("DGI" not in x["hold"] for x in actions.suggest_warmups(plan_dgi)))
+    check("apply_warmup_minutes rejects unknown team", raises(lambda: actions.apply_warmup_minutes(
+        plan_eft, [{"id": "x", "minutes": 12}]), 404) is not None)
+    check("apply_warmup_minutes rejects < 1 min", raises(lambda: actions.apply_warmup_minutes(
+        plan_eft, [{"id": plan_eft["raw_rows"][1]["id"], "minutes": 0}]), 400) is not None)
+    check("solve with nothing to solve returns empty", actions.solve_warmups(actions.new_plan())
+          == {"changes": [], "placed": [], "remaining": []})
 
     # ---------- bytte opvarmningstid ----------
     check("swap with unknown team -> 404",

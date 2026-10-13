@@ -160,6 +160,7 @@ async function init() {
   document.getElementById("btn-reset").addEventListener("click", onReset);
   document.getElementById("brand-home").addEventListener("click", () => setView("oversigt"));
   document.getElementById("bulk-move").addEventListener("click", onBulkMove);
+  document.getElementById("btn-solve").addEventListener("click", onSolve);
   document.getElementById("bulk-delete").addEventListener("click", onBulkDelete);
   document.getElementById("bulk-clear").addEventListener("click", () => {
     selectedIds.clear();
@@ -554,12 +555,16 @@ function renderOvernightBanner() {
 // Forslag beregnes kun her og kun når der er hold uden plads, fordi hvert
 // forslag kræver flere genberegninger af planen.
 let suggestionToken = 0;
+// Resultatet af "Find løsning" gælder kun den plan, det blev beregnet for.
+let solveResult = null;
+let solveFor = null;
 
 async function renderSuggestions() {
   const section = document.getElementById("suggestions");
   const list = document.getElementById("suggestion-list");
   const unplaced = unplacedRows();
   section.classList.toggle("hidden", unplaced.length === 0);
+  renderSolveResult();
   if (!unplaced.length) return;
 
   const token = ++suggestionToken;
@@ -595,6 +600,80 @@ async function renderSuggestions() {
     li.append(text, btn);
     return li;
   }));
+}
+
+async function onSolve() {
+  const btn = document.getElementById("btn-solve");
+  const box = document.getElementById("solve-result");
+  btn.disabled = true;
+  box.classList.remove("hidden");
+  box.textContent = "Søger efter en løsning … (det kan tage op til et halvt minut)";
+  await new Promise((r) => setTimeout(r, 30));   // lad teksten blive vist først
+  const forState = STATE;
+  try {
+    solveResult = await Api.request("GET", "/api/solve");
+    solveFor = forState;
+  } catch (e) {
+    solveResult = null;
+    alert(e.message || "Kunne ikke finde en løsning.");
+  }
+  btn.disabled = false;
+  renderSolveResult();
+}
+
+function renderSolveResult() {
+  const box = document.getElementById("solve-result");
+  if (document.getElementById("btn-solve").disabled) return;   // søgning i gang
+  if (!solveResult || solveFor !== STATE) {
+    // planen er ændret siden — et gammelt resultat må ikke bruges
+    solveResult = null;
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  box.replaceChildren();
+  const { changes, placed, remaining } = solveResult;
+  const p = document.createElement("p");
+  if (!placed.length) {
+    p.textContent = "Ingen løsning fundet: der er ikke plads, heller ikke med 10 min opvarmning til holdene omkring. "
+      + "Flyt holdet i programmet, eller træk det ind på tidslinjen.";
+    box.appendChild(p);
+    return;
+  }
+  const total = placed.length + remaining.length;
+  p.textContent = `${placed.length} af ${total} hold får plads (${placed.join(", ")}), `
+    + `hvis ${changes.length} hold får kortere opvarmning:`;
+  const ul = document.createElement("ul");
+  changes.forEach((c) => {
+    const li = document.createElement("li");
+    li.textContent = `${c.hold} (går på ${c.opvisningTid} i ${c.opvisningHal}): ${c.from} → ${c.to} min`;
+    ul.appendChild(li);
+  });
+  box.append(p, ul);
+  if (remaining.length) {
+    const rest = document.createElement("p");
+    rest.textContent = `Stadig uden plads: ${remaining.join(", ")}.`;
+    box.appendChild(rest);
+  }
+  const actionsEl = document.createElement("div");
+  actionsEl.className = "solve-actions";
+  const use = document.createElement("button");
+  use.type = "button";
+  use.className = "btn btn-sm btn-primary";
+  use.textContent = "Brug løsningen";
+  use.addEventListener("click", async () => {
+    const payloadChanges = changes.map((c) => ({ id: c.id, minutes: c.to }));
+    solveResult = null;
+    STATE = await apiJSON("/api/warmup-minutes", "POST", { changes: payloadChanges });
+    render();
+  });
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn btn-sm btn-outline-secondary";
+  cancel.textContent = "Annullér";
+  cancel.addEventListener("click", () => { solveResult = null; renderSolveResult(); });
+  actionsEl.append(use, cancel);
+  box.appendChild(actionsEl);
 }
 
 function suggestionLine(text, none) {

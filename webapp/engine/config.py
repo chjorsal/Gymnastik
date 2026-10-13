@@ -7,6 +7,9 @@ SKIFTE_MIN = 0
 SKIFTE_I_SLOTTET_MIN = 0
 STEP_MIN = 1
 MAX_EARLY_MIN = 10
+# Et hold må højst være færdigt med opvarmning 25 min før gangtiden, dvs.
+# 30 min før det skal på gulvet. Først prøves 0-10 min, så op til 25.
+MAX_EARLY_TOTAL_MIN = 25
 
 # Standard opvarmningstider i minutter (bruges når et hold ikke har fået en
 # manuel opvarmningstid sat i UI'en)

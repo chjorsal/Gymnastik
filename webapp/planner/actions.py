@@ -409,6 +409,9 @@ def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
 
 
 SUGGEST_MIN_MINUTES = 10   # kortere opvarmning end dette foreslås aldrig
+# Efterskoler og DGI-hold beholder altid deres 30 min, medmindre I selv
+# ændrer det — de forkortes aldrig af forslag eller "Find løsning".
+PROTECTED_TYPES = {"efterskole", "dgi"}
 SUGGEST_MAX_TEAMS = 10     # begræns beregningen, hvis rigtig mange hold mangler plads
 
 
@@ -417,7 +420,8 @@ def suggest_warmups(plan: dict) -> List[dict]:
     giver plads uden at skubbe andre hold ud. Ændrer ikke planen."""
     views = _views(plan)
     ok_before = _ok_ids(views)
-    unplaced = [r for r in views.values() if r["needsWarmup"] and r["status"] == "KAN IKKE PLANLÆGGES"]
+    unplaced = [r for r in views.values() if r["needsWarmup"] and r["status"] == "KAN IKKE PLANLÆGGES"
+                and r["holdtype"] not in PROTECTED_TYPES]
     suggestions = []
     for u in unplaced[:SUGGEST_MAX_TEAMS]:
         current = u["opvarmningMinOverride"] if u["opvarmningMinOverride"] is not None else u["opvarmningMinDefault"]
@@ -434,6 +438,102 @@ def suggest_warmups(plan: dict) -> List[dict]:
                 })
                 break
     return suggestions
+
+
+SOLVE_MAX_REDUCTION = 5    # højst så mange minutter kortere pr. hold
+SOLVE_MAX_NEIGHBOURS = 6   # højst så mange hold omkring holdet forkortes
+
+
+def _effective_minutes(view: dict) -> int:
+    o = view["opvarmningMinOverride"]
+    return o if o is not None else view["opvarmningMinDefault"]
+
+
+def solve_warmups(plan: dict) -> dict:
+    """Prøver at give hold uden plads en opvarmning ved at forkorte holdet
+    selv og holdene, der varmer op samtidig (ned til 10 min, aldrig
+    efterskoler eller DGI-hold). Små ændringer på få hold foretrækkes. Holdene tages ét ad
+    gangen efter opvisningstid, og der regnes forfra efter hver løsning.
+    Ændrer ikke planen — returnerer forslaget."""
+    work = copy.deepcopy(plan)
+    original = _views(plan)
+    progress = True
+    tried_without_luck = set()
+    while progress:
+        progress = False
+        views = _views(work)
+        ok_now = _ok_ids(views)
+        unplaced = sorted(
+            (v for v in views.values() if v["needsWarmup"] and v["status"] == "KAN IKKE PLANLÆGGES"
+             and v["id"] not in tried_without_luck),
+            key=lambda v: v["opvisningMin"] if v["opvisningMin"] is not None else 0,
+        )
+        for u in unplaced:
+            walk = engine.gang_tid()
+            latest = u["opvisningMin"] - walk
+            window = (latest - engine.MAX_EARLY_TOTAL_MIN - _effective_minutes(u), latest)
+            centre = sum(window) / 2
+            neighbours = sorted(
+                (v for v in views.values()
+                 if v["status"] == "OK" and v["holdtype"] not in PROTECTED_TYPES
+                 and v["opvarmningStartMin"] < window[1] and v["opvarmningSlutMin"] > window[0]),
+                key=lambda v: abs((v["opvarmningStartMin"] + v["opvarmningSlutMin"]) / 2 - centre),
+            )[:SOLVE_MAX_NEIGHBOURS]
+            own = [] if u["holdtype"] in PROTECTED_TYPES else [u]
+            # billigste forsøg først: få minutter på få hold
+            attempts = sorted(
+                ((d, n) for d in range(1, SOLVE_MAX_REDUCTION + 1) for n in range(len(neighbours) + 1)),
+                key=lambda dn: (dn[0] * (len(own) + dn[1]), dn[0]),
+            )
+            for d, n in attempts:
+                group = own + neighbours[:n]
+                changes = {v["id"]: max(SUGGEST_MIN_MINUTES, _effective_minutes(v) - d) for v in group}
+                if all(changes[v["id"]] == _effective_minutes(v) for v in group):
+                    continue
+                trial = copy.deepcopy(work)
+                for rid, minutes in changes.items():
+                    _find_row(trial, rid)["OpvarmningMinOverride"] = minutes
+                after = _views(trial)
+                if after[u["id"]]["status"] == "OK" and ok_now <= _ok_ids(after):
+                    work = trial
+                    progress = True
+                    break
+            else:
+                tried_without_luck.add(u["id"])
+                continue
+            break   # regn forfra efter hver løsning
+
+    final = _views(work)
+    changes = []
+    for rid, v in final.items():
+        before, after = _effective_minutes(original[rid]), _effective_minutes(v)
+        if before != after:
+            changes.append({"id": rid, "hold": v["hold"], "from": before, "to": after,
+                            "opvisningHal": v["opvisningHal"], "opvisningTid": v["opvisningTid"]})
+    was_unplaced = [v for v in original.values() if v["needsWarmup"] and v["status"] == "KAN IKKE PLANLÆGGES"]
+    return {
+        "changes": sorted(changes, key=lambda c: (c["opvisningHal"], c["opvisningTid"])),
+        "placed": [v["hold"] for v in was_unplaced if final[v["id"]]["status"] == "OK"],
+        "remaining": [v["hold"] for v in was_unplaced if final[v["id"]]["status"] != "OK"],
+    }
+
+
+def apply_warmup_minutes(plan: dict, changes: List[dict]) -> None:
+    """Sætter opvarmningstiden for flere hold på én gang (fra "Find løsning")."""
+    rows = []
+    for c in changes:
+        row = _find_row(plan, c.get("id"))
+        if row is None:
+            raise ActionError("Et af holdene findes ikke længere — find løsningen igen", 404)
+        try:
+            minutes = int(c.get("minutes"))
+        except (TypeError, ValueError):
+            raise ActionError("Ugyldig opvarmningstid")
+        if minutes < 1:
+            raise ActionError("Opvarmningstiden skal være mindst 1 min")
+        rows.append((row, minutes))
+    for row, minutes in rows:
+        row["OpvarmningMinOverride"] = minutes
 
 
 def reset_rows(plan: dict) -> None:

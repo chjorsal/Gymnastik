@@ -19,3 +19,4 @@ opvisning_med_opvarmning.xlsx
 # Genereret browserudgave og downloads til den
 site/
 webapp/.build-cache/
+webapp/state.backup-*.json
