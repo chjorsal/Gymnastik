@@ -256,7 +256,7 @@ def run():
     err = raises(lambda: actions.place_warmup(plan_p, a["id"], "V1", "08:50"), 400)
     check("place_warmup that ends after the show is refused", err is not None and plan_p == before)
 
-    # ---------- forslag om kortere opvarmning (ned til 10 min) ----------
+    # ---------- kortere opvarmning giver plads (ned til 10 min) ----------
     plan_s2 = actions.new_plan()
     actions.create_warmup_hall(plan_s2, "V1")
     actions.create_show_hall(plan_s2, "Sal")
@@ -265,16 +265,10 @@ def run():
     # (B ville skulle vente mere end 25 min)
     unplaced = [r["hold"] for r in actions.payload(plan_s2)["rows"] if r["status"] != "OK"]
     check("scenario: B, D and F have no room with 15 min", unplaced == ["B", "D", "F"], unplaced)
-    before = copy.deepcopy(plan_s2)
-    sug = actions.suggest_warmups(plan_s2)
-    check("F gets the longest warm-up that fits (12 min)",
-          [(x["hold"], x["minutes"], x["hal"], x["start"], x["end"]) for x in sug] == [("F", 12, "V1", "09:43", "09:55")], sug)
-    check("D gets no suggestion: not even 10 min fits", all(x["hold"] != "D" for x in sug))
-    check("suggestions never go below 10 min", all(x["minutes"] >= 10 for x in sug))
-    check("suggest_warmups does not change the plan", plan_s2 == before)
-    actions.patch_row(plan_s2, sug[0]["id"], "opvarmningMin", sug[0]["minutes"])
+    f_id = next(r["id"] for r in plan_s2["raw_rows"] if r["Hold"] == "F")
+    actions.patch_row(plan_s2, f_id, "opvarmningMin", 12)
     f = {r["hold"]: r for r in actions.payload(plan_s2)["rows"]}["F"]
-    check("using the suggestion places the team as promised", (f["status"], f["opvarmningStart"]) == ("OK", "09:43"), f)
+    check("F fits with 12 min warm-up (09:43)", (f["status"], f["opvarmningStart"]) == ("OK", "09:43"), f)
 
     # ---------- kanttilfælde ----------
     plan_e = actions.new_plan()
@@ -294,7 +288,8 @@ def run():
     plan_n = actions.new_plan()
     actions.create_show_hall(plan_n, "Sal")
     actions.upload(plan_n, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal")
-    check("no warm-up halls -> no suggestions (nothing to place in)", actions.suggest_warmups(plan_n) == [])
+    sol_n = actions.solve_warmups(plan_n)
+    check("no warm-up halls -> solve changes nothing", sol_n["changes"] == [] and sol_n["placed"] == [], sol_n)
     check("place_warmup without warm-up halls is refused",
           raises(lambda: actions.place_warmup(plan_n, plan_n["raw_rows"][0]["id"], "V1", "08:00"), 400) is not None)
 
@@ -305,7 +300,9 @@ def run():
     for r in plan_10["raw_rows"]:
         if r["Hold"] == "F":
             r["OpvarmningMinOverride"] = 10
-    check("a team already at 10 min gets no suggestion", all(x["hold"] != "F" for x in actions.suggest_warmups(plan_10)))
+    sol_10 = actions.solve_warmups(plan_10)
+    check("solve never takes a team below 10 min",
+          all(c["to"] >= 10 for c in sol_10["changes"]) and all(c["hold"] != "F" for c in sol_10["changes"]), sol_10)
 
     weird = '<script>alert("x")</script> Ø-hold & co'
     actions.add_team(plan_e, "Sal", weird)
@@ -385,8 +382,6 @@ def run():
                                                          ("DGI MiniMix", 12), ("D", 12)]))], show_hal="Sal")
     sol_d = actions.solve_warmups(plan_dgi)
     check("DGI teams are never shortened by solve", all("DGI" not in c["hold"] for c in sol_d["changes"]), sol_d["changes"])
-    check("DGI teams get no shorter-warm-up suggestion",
-          all("DGI" not in x["hold"] for x in actions.suggest_warmups(plan_dgi)))
     check("apply_warmup_minutes rejects unknown team", raises(lambda: actions.apply_warmup_minutes(
         plan_eft, [{"id": "x", "minutes": 12}]), 404) is not None)
     check("apply_warmup_minutes rejects < 1 min", raises(lambda: actions.apply_warmup_minutes(

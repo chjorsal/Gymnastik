@@ -421,37 +421,10 @@ def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
         )
 
 
-SUGGEST_MIN_MINUTES = 10   # kortere opvarmning end dette foreslås aldrig
+SOLVE_MIN_MINUTES = 10     # kortere opvarmning end dette foreslås aldrig
 # Efterskoler og DGI-hold beholder altid deres 30 min, medmindre I selv
-# ændrer det — de forkortes aldrig af forslag eller "Find løsning".
+# ændrer det — de forkortes aldrig af "Find løsning".
 PROTECTED_TYPES = {"efterskole", "dgi"}
-SUGGEST_MAX_TEAMS = 10     # begræns beregningen, hvis rigtig mange hold mangler plads
-
-
-def suggest_warmups(plan: dict) -> List[dict]:
-    """For hvert hold uden plads: den længste opvarmning ned til 10 min, der
-    giver plads uden at skubbe andre hold ud. Ændrer ikke planen."""
-    views = _views(plan)
-    ok_before = _ok_ids(views)
-    unplaced = [r for r in views.values() if r["needsWarmup"] and r["status"] == "KAN IKKE PLANLÆGGES"
-                and r["holdtype"] not in PROTECTED_TYPES]
-    suggestions = []
-    for u in unplaced[:SUGGEST_MAX_TEAMS]:
-        for minutes in range(_effective_minutes(u) - 1, SUGGEST_MIN_MINUTES - 1, -1):
-            trial = copy.deepcopy(plan)
-            _find_row(trial, u["id"])["OpvarmningMinOverride"] = minutes
-            after = _views(trial)
-            r = after[u["id"]]
-            if r["status"] == "OK" and ok_before <= _ok_ids(after):
-                suggestions.append({
-                    "id": u["id"], "hold": u["hold"], "minutes": minutes,
-                    "hal": r["opvarmningHalBeregnet"], "start": r["opvarmningStart"], "end": r["opvarmningSlut"],
-                    "opvisningHal": u["opvisningHal"], "opvisningTid": u["opvisningTid"],
-                })
-                break
-    return suggestions
-
-
 SOLVE_MAX_REDUCTION = 5    # højst så mange minutter kortere pr. hold
 SOLVE_MAX_NEIGHBOURS = 6   # højst så mange hold omkring holdet forkortes
 
@@ -494,7 +467,7 @@ def solve_warmups(plan: dict) -> dict:
             )
             for d, n in attempts:
                 group = own + neighbours[:n]
-                changes = {v["id"]: max(SUGGEST_MIN_MINUTES, _effective_minutes(v) - d) for v in group}
+                changes = {v["id"]: max(SOLVE_MIN_MINUTES, _effective_minutes(v) - d) for v in group}
                 if all(changes[v["id"]] == _effective_minutes(v) for v in group):
                     continue
                 trial = copy.deepcopy(work)

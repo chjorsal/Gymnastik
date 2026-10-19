@@ -292,11 +292,10 @@ td.narrow-col, .start-time-input, .hall-time-input, .hall-row-time { font-varian
 .hall-row-time, .hall-row-count { color: var(--slate); }
 .hall-row-problem { color: var(--signal); font-weight: 700; }
 .hall-row-open { color: #c45500; font-weight: 700; }
-.suggestion { display: flex; align-items: center; gap: 16px; padding: 12px 4px; }
-.suggestion-text { flex: 1; }
-.suggestion-text strong { font-weight: 700; }
-.suggestion-none { color: var(--slate); }
-.solve-result { background: var(--page); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 14px; }
+.solve-result {
+  background: var(--card); border: 1px solid var(--card-line); border-left: 4px solid var(--accent);
+  border-radius: var(--radius); padding: 16px 20px; margin: -8px 0 22px;
+}
 .solve-result p { margin: 0 0 8px; }
 .solve-result ul { margin: 0 0 12px; padding-left: 18px; }
 .solve-result li { font-variant-numeric: tabular-nums; }

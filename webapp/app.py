@@ -194,11 +194,6 @@ def apply_warmup_minutes(payload: WarmupMinutes):
     return run_action(actions.apply_warmup_minutes, payload.changes)
 
 
-@app.get("/api/suggestions")
-def suggestions():
-    return actions.suggest_warmups(STATE)
-
-
 @app.post("/api/rows/reorder")
 def reorder_rows(payload: ReorderPayload):
     return run_action(actions.reorder_rows, payload.hal, payload.orderedIds)

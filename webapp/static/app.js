@@ -231,8 +231,7 @@ async function init() {
   document.getElementById("btn-reset").addEventListener("click", onReset);
   document.getElementById("brand-home").addEventListener("click", () => setView("oversigt"));
   document.getElementById("bulk-move").addEventListener("click", onBulkMove);
-  document.getElementById("btn-solve").addEventListener("click", onSolve);
-  // Løsningen vises på oversigten, sammen med forslagene.
+  // Løsningen vises på oversigten, lige under den røde linje.
   document.getElementById("btn-solve-warmup").addEventListener("click", () => { setView("oversigt"); onSolve(); });
   document.getElementById("bulk-delete").addEventListener("click", onBulkDelete);
   document.getElementById("bulk-clear").addEventListener("click", () => {
@@ -633,7 +632,7 @@ function renderOverview() {
 
   renderProblemBanner();
   renderOvernightBanner();
-  renderSuggestions();
+  renderSolveResult();
   renderTimeline(teams);
   renderShowHallSummary();
 }
@@ -681,7 +680,9 @@ function setBanner(id, text, actionText, onClick) {
 function renderProblemBanner() {
   const count = unplacedRows().length;
   setBanner("problem-banner", count ? `${plural(count, "hold mangler", "hold mangler")} plads til opvarmning.` : "",
-    "Løs det", () => setView("opvarmning"));
+    "Find løsning", onSolve);
+  document.getElementById("problem-banner").title =
+    "Forkort holdet og holdene omkring det (ned til 10 min, aldrig efterskoler eller DGI-hold)";
 }
 
 function renderOvernightBanner() {
@@ -694,60 +695,16 @@ function renderOvernightBanner() {
     "Åbn program", () => openProgram(late[0].name));
 }
 
-// Forslag beregnes kun her og kun når der er hold uden plads, fordi hvert
-// forslag kræver flere genberegninger af planen.
-let suggestionToken = 0;
-// Resultatet af "Find løsning" gælder kun den plan, det blev beregnet for.
+// "Find løsning" er den ene vej til at give hold uden plads en opvarmning.
+// Resultatet gælder kun den plan, det blev beregnet for.
 let solveResult = null;
 let solveFor = null;
-
-async function renderSuggestions() {
-  const section = document.getElementById("suggestions");
-  const list = document.getElementById("suggestion-list");
-  const unplaced = unplacedRows();
-  section.classList.toggle("hidden", unplaced.length === 0);
-  renderSolveResult();
-  if (!unplaced.length) return;
-
-  const token = ++suggestionToken;
-  list.replaceChildren(suggestionLine("Beregner forslag …"));
-  let suggestions;
-  try {
-    suggestions = await Api.request("GET", "/api/suggestions");
-  } catch (e) {
-    suggestions = [];
-  }
-  if (token !== suggestionToken) return;   // planen er ændret i mellemtiden
-
-  const byId = new Map(suggestions.map((s) => [s.id, s]));
-  list.replaceChildren(...unplaced.map((r) => {
-    const s = byId.get(r.id);
-    if (!s) {
-      return suggestionLine(`${r.hold} (går på ${r.opvisningTid} i ${r.opvisningHal}): ingen plads, heller ikke med 10 min `
-        + "opvarmning. Flyt holdet i programmet, eller træk det ind på tidslinjen.", true);
-    }
-    const li = document.createElement("li");
-    li.className = "suggestion";
-    const text = document.createElement("span");
-    text.className = "suggestion-text";
-    const strong = document.createElement("strong");
-    strong.textContent = s.hold;
-    text.append(strong, document.createTextNode(
-      ` (går på ${s.opvisningTid} i ${s.opvisningHal}): med ${s.minutes} min opvarmning er der plads i ${s.hal} ${s.start}–${s.end}.`));
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn btn-sm btn-primary";
-    btn.textContent = "Brug forslag";
-    btn.addEventListener("click", () => patchRow(s.id, "opvarmningMin", s.minutes));
-    li.append(text, btn);
-    return li;
-  }));
-}
+let solving = false;
 
 async function onSolve() {
-  const btn = document.getElementById("btn-solve");
+  if (solving) return;
   const box = document.getElementById("solve-result");
-  btn.disabled = true;
+  solving = true;
   box.classList.remove("hidden");
   box.textContent = "Søger efter en løsning … (det kan tage op til et halvt minut)";
   await new Promise((r) => setTimeout(r, 30));   // lad teksten blive vist først
@@ -759,13 +716,13 @@ async function onSolve() {
     solveResult = null;
     alert(e.message || "Kunne ikke finde en løsning.");
   }
-  btn.disabled = false;
+  solving = false;
   renderSolveResult();
 }
 
 function renderSolveResult() {
   const box = document.getElementById("solve-result");
-  if (document.getElementById("btn-solve").disabled) return;   // søgning i gang
+  if (solving) return;   // søgning i gang
   if (!solveResult || solveFor !== STATE) {
     // planen er ændret siden — et gammelt resultat må ikke bruges
     solveResult = null;
@@ -779,7 +736,12 @@ function renderSolveResult() {
   if (!placed.length) {
     p.textContent = "Ingen løsning fundet: der er ikke plads, heller ikke med 10 min opvarmning til holdene omkring. "
       + "Flyt holdet i programmet, eller træk det ind på tidslinjen.";
-    box.appendChild(p);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "btn btn-sm btn-outline-secondary";
+    close.textContent = "Luk";
+    close.addEventListener("click", () => { solveResult = null; renderSolveResult(); });
+    box.append(p, close);
     return;
   }
   const total = placed.length + remaining.length;
@@ -794,7 +756,7 @@ function renderSolveResult() {
   box.append(p, ul);
   if (remaining.length) {
     const rest = document.createElement("p");
-    rest.textContent = `Stadig uden plads: ${remaining.join(", ")}.`;
+    rest.textContent = `Stadig uden plads: ${remaining.join(", ")}. Flyt holdet i programmet, eller træk det ind på tidslinjen.`;
     box.appendChild(rest);
   }
   const actionsEl = document.createElement("div");
@@ -815,13 +777,6 @@ function renderSolveResult() {
   cancel.addEventListener("click", () => { solveResult = null; renderSolveResult(); });
   actionsEl.append(use, cancel);
   box.appendChild(actionsEl);
-}
-
-function suggestionLine(text, none) {
-  const li = document.createElement("li");
-  li.className = "suggestion" + (none ? " suggestion-none" : "");
-  li.textContent = text;
-  return li;
 }
 
 const TL_LABEL_W = 110;   // bredde på hal-navnene til venstre (px)

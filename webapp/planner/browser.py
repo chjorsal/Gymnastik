@@ -81,11 +81,6 @@ def import_plan(text: str) -> str:
         return _error(e)
 
 
-def suggestions(plan_json: str) -> str:
-    """Forslag om kortere opvarmning (ned til 10 min) — ændrer intet."""
-    return _dump(actions.suggest_warmups(_plan(plan_json)))
-
-
 def solve(plan_json: str) -> str:
     """Find løsning: forkort hold uden plads og holdene omkring dem — ændrer intet."""
     return _dump(actions.solve_warmups(_plan(plan_json)))

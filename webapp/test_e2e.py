@@ -311,20 +311,14 @@ def new_features(page, tmp, dialogs):
     unplaced = page.evaluate("() => STATE.rows.filter(r => r.status !== 'OK').map(r => r.hold)")
     check("scenarie: B, D og F mangler plads", unplaced == ["B", "D", "F"], unplaced)
 
-    page.wait_for_selector("#suggestion-list .btn-primary", timeout=60_000)
-    lines = page.locator("#suggestion-list li").all_inner_texts()
-    check("forslag: F med 12 min i Varm 1 09:43–09:55",
-          any(l.startswith("F") and "12 min" in l and "Varm 1 09:43–09:55" in l for l in lines), lines)
-    check("D får besked om, at der ikke er plads selv med 10 min",
-          any(l.startswith("D") and "10 min" in l and "Brug forslag" not in l for l in lines), lines)
-    page.locator("#suggestion-list li", has_text="F (går på").locator(".btn-primary").click()
-    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'F').status === 'OK'")
+    check("den røde linje har én knap: Find løsning",
+          "Find løsning" in page.inner_text("#problem-banner .banner-action")
+          and page.locator("text=Brug forslag").count() == 0 and page.locator("text=Løs det").count() == 0)
+    f_id = page.evaluate("() => STATE.rows.find(r => r.hold === 'F').id")
+    api(page, "PATCH", f"/api/rows/{f_id}", {"field": "opvarmningMin", "value": 12})
+    refresh(page)
     f = page.evaluate("() => STATE.rows.find(r => r.hold === 'F')")
-    check("Brug forslag giver F 12 min og plads", (f["opvarmningMinOverride"], f["opvarmningStart"]) == (12, "09:43"), f)
-    page.wait_for_function("() => !document.querySelector('#suggestion-list').innerText.includes('Beregner')")
-    lines = page.locator("#suggestion-list li").all_inner_texts()
-    check("forslagene beregnes forfra efter en ændring",
-          [l[0] for l in lines] == ["B", "D"] and all("Brug forslag" not in l for l in lines), lines)
+    check("F får plads med 12 min opvarmning", (f["status"], f["opvarmningStart"]) == ("OK", "09:43"), f)
 
     # 3: træk D ind i et hul på tidslinjen
     tl = page.evaluate("() => { const d = document.getElementById('timeline').dataset;"
@@ -347,8 +341,8 @@ def new_features(page, tmp, dialogs):
                        " return {from: +d.from, span: +d.span, w: +d.trackW}; }")
     page.locator(".tl-lane-problem .tl-block").first.drag_to(lane, target_position={"x": x_at("08:20"), "y": 20})
     page.wait_for_function("() => STATE.rows.find(r => r.hold === 'B').status === 'OK'")
-    check("ingen hold uden plads -> ingen forslag og ingen rød række",
-          page.is_hidden("#suggestions") and page.locator(".tl-lane-problem").count() == 0)
+    check("ingen hold uden plads -> ingen rød linje og ingen rød række",
+          page.is_hidden("#problem-banner") and page.locator(".tl-lane-problem").count() == 0)
 
 
 def add_from_menu(page, item):
@@ -521,7 +515,7 @@ def solve_tests(page, tmp):
           page.evaluate("() => currentView") == "oversigt" and missing() == before)
     page.click("#solve-result >> text=Annullér")
 
-    page.click("#btn-solve")
+    page.click("#problem-banner")
     page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
     text = page.inner_text("#solve-result")
     check("Find løsning viser hvilke hold der får plads og hvad der forkortes", "får plads" in text and "→" in text, text)
@@ -530,7 +524,7 @@ def solve_tests(page, tmp):
     page.click("#solve-result >> text=Annullér")
     check("Annullér skjuler løsningen og ændrer intet", page.is_hidden("#solve-result") and missing() == before)
 
-    page.click("#btn-solve")
+    page.click("#problem-banner")
     page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
     api(page, "POST", "/api/rows/special", {"hal": "Sal A", "type": "pause"})
     refresh(page)
@@ -538,7 +532,7 @@ def solve_tests(page, tmp):
     api(page, "DELETE", "/api/rows/" + page.evaluate("() => STATE.rows.find(r => r.type === 'pause').id"))
     refresh(page)
 
-    page.click("#btn-solve")
+    page.click("#problem-banner")
     page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
     page.click("#solve-result >> text=Brug løsningen")
     page.wait_for_function(f"() => STATE.rows.filter(r => r.status !== 'OK').length < {len(before)}")
