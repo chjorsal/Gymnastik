@@ -11,7 +11,7 @@ Bruges af app.py (server) og planner/browser.py (Pyodide i browseren).
 
 import copy
 import json
-from pathlib import Path
+import re
 from typing import List, Optional, Tuple
 
 import engine
@@ -36,6 +36,10 @@ EDITABLE_FIELD_MAP = {
 
 INVALID_PLAN = "Filen er ikke en gyldig plan."
 
+# En ny plan starter med én opvisningshal, så man kan trække Excel-filen
+# direkte ind på den. Navnet kan rettes bagefter.
+DEFAULT_SHOW_HALL = "Hal 1"
+
 
 class ActionError(Exception):
     """En handling blev afvist. message er dansk og vises til brugeren."""
@@ -52,6 +56,13 @@ class ActionError(Exception):
 
 def new_plan() -> dict:
     return copy.deepcopy(DEFAULT_PLAN)
+
+
+def start_plan() -> dict:
+    """Planen en ny bruger starter med: en tom plan med opvisningshallen Hal 1."""
+    plan = new_plan()
+    create_show_hall(plan, DEFAULT_SHOW_HALL)
+    return plan
 
 
 def migrate(data) -> dict:
@@ -125,6 +136,28 @@ def export_xlsx(plan: dict) -> bytes:
     return engine.build_workbook(_compute(plan), show_hal_names(plan)).getvalue()
 
 
+DEFAULT_EXPORT_NAME = "opvisning_med_opvarmning"
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_RESERVED_FILENAMES = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
+                       *(f"lpt{i}" for i in range(1, 10))}
+MAX_EXPORT_NAME = 100
+
+
+def export_filename(name: Optional[str]) -> str:
+    """Brugerens navn til Excel-filen gjort sikkert: tegn Windows ikke
+    tillader bliver til mellemrum, højst 100 tegn, og altid med .xlsx."""
+    text = " ".join(_ILLEGAL_FILENAME_CHARS.sub(" ", str(name or "")).split())
+    if text.lower().endswith(".xlsx"):
+        text = text[:-5]
+    text = text.strip(" .")[:MAX_EXPORT_NAME].rstrip(" .")
+    if not text:
+        text = DEFAULT_EXPORT_NAME
+    first, dot, rest = text.partition(".")
+    if first.lower() in _RESERVED_FILENAMES:   # fx CON eller con.backup
+        text = f"{first}_{dot}{rest}"
+    return f"{text}.xlsx"
+
+
 # ======================================================
 # HJÆLPERE
 # ======================================================
@@ -161,8 +194,12 @@ def show_hal_names(plan: dict) -> List[str]:
     return [h["name"] for h in plan["show_halls"]]
 
 
+def _rows_in(plan: dict, hal_name: str) -> List[dict]:
+    return [r for r in plan["raw_rows"] if r["OpvisningHal"] == hal_name]
+
+
 def _next_order(plan: dict, hal_name: str) -> int:
-    orders = [r["Order"] for r in plan["raw_rows"] if r["OpvisningHal"] == hal_name]
+    orders = [r["Order"] for r in _rows_in(plan, hal_name)]
     return (max(orders) + 1) if orders else 0
 
 
@@ -170,56 +207,51 @@ def _find_row(plan: dict, row_id: str) -> Optional[dict]:
     return next((r for r in plan["raw_rows"] if r["id"] == row_id), None)
 
 
+def _views(plan: dict) -> dict:
+    return {r["id"]: r for r in engine.to_row_dicts(_compute(plan), plan["warmup_halls"])}
+
+
+def _ok_ids(views: dict) -> set:
+    return {rid for rid, r in views.items() if r["status"] == "OK"}
+
+
+def _effective_minutes(view: dict) -> int:
+    o = view["opvarmningMinOverride"]
+    return o if o is not None else view["opvarmningMinDefault"]
+
+
 # ======================================================
 # RÆKKER
 # ======================================================
 
 def upload(plan: dict, files: List[Tuple[str, bytes]], show_hal: Optional[str] = None) -> None:
-    """Indlæser Excel-filer. Med show_hal lægges alle hold i den hal; ellers
-    navngives hallen ud fra filnavnet. Alle filer valideres, før planen ændres."""
-    # En eksisterende hal UDEN hold (fx efter "Ryd alle hold") tæller ikke som
-    # optaget — den genbruges i stedet for at oprette "Arena (2)".
-    halls_with_rows = {r["OpvisningHal"] for r in plan["raw_rows"]}
-    existing_names = {h["name"] for h in plan["show_halls"] if h["name"] in halls_with_rows}
-    explicit_name = (show_hal or "").strip()
-    pending_new_names = set()
-    planned = []  # (hal_name, is_new_hal, suggested_start, rows)
+    """Indlæser Excel-filer i én opvisningshal. Uden show_hal bruges den
+    første opvisningshal, og findes der ingen, oprettes Hal 1. Alle filer
+    valideres, før planen ændres."""
+    first_hal = plan["show_halls"][0]["name"] if plan["show_halls"] else DEFAULT_SHOW_HALL
+    hal_name = (show_hal or "").strip() or first_hal
 
+    loaded = []  # (rækker, foreslået starttid) pr. fil
     for filename, content in files:
-        if explicit_name:
-            hal_name = explicit_name
-        else:
-            # Automatisk navngivning må aldrig stille flette ind i en hal med
-            # hold — gør navnet unikt, også inden for samme upload.
-            base_name = engine.clean_hal_name(Path(filename).stem)
-            hal_name = base_name
-            suffix = 2
-            while hal_name in existing_names or hal_name in pending_new_names:
-                hal_name = f"{base_name} ({suffix})"
-                suffix += 1
-
-        is_new_hal = hal_name not in existing_names and hal_name not in pending_new_names
-        if is_new_hal:
-            pending_new_names.add(hal_name)
-
         try:
-            rows, suggested_start = engine.load_excel_bytes(filename, content, hal_name, 0)
+            loaded.append(engine.load_excel_bytes(filename, content, hal_name, 0))
         except Exception as e:
             raise ActionError(f"Kunne ikke læse '{filename}' — er det en gyldig Excel-fil (.xlsx)? ({e})")
-        planned.append((hal_name, is_new_hal, suggested_start, rows))
 
-    for hal_name, is_new_hal, suggested_start, rows in planned:
-        if is_new_hal:
-            existing = _find_show_hal(plan, hal_name)
-            if existing is None:
-                plan["show_halls"].append({"name": hal_name, "startTime": suggested_start or "09:00"})
-            elif suggested_start and not explicit_name:
-                # genbrugt tom hal fundet via filnavnet: filens starttid gælder.
-                # Har brugeren selv valgt hallen, beholdes brugerens starttid.
-                existing["startTime"] = suggested_start
-        start_order = _next_order(plan, hal_name)
-        for i, row in enumerate(rows):
-            row["Order"] = start_order + i
+    file_start = next((start for _, start in loaded if start), None)
+    hal = _find_show_hal(plan, hal_name)
+    if hal is None:
+        plan["show_halls"].append({"name": hal_name, "startTime": file_start or "09:00"})
+    elif file_start and not hal.get("startTimeSet") and not _rows_in(plan, hal_name):
+        # Tom hal: filens første 'Tid' gælder, medmindre brugeren selv har
+        # skrevet en starttid for hallen.
+        hal["startTime"] = file_start
+
+    order = _next_order(plan, hal_name)
+    for rows, _ in loaded:
+        for row in rows:
+            row["Order"] = order
+            order += 1
         plan["raw_rows"].extend(rows)
 
 
@@ -316,21 +348,10 @@ def add_team(plan: dict, hal: str, name: str) -> None:
         raise ActionError("Skriv et holdnavn")
     if _find_show_hal(plan, hal) is None:
         raise ActionError("Opvisningshal ikke fundet", 404)
-    plan["raw_rows"].append({
-        "id": engine.new_id(),
-        "Hold": name,
-        "Type": "hold",
-        "AntalPersoner": 0,
-        "HoldtypeRaw": None,
-        "AlderRaw": None,
-        "OpvisningHal": hal,
-        "Varighed": MANUAL_TEAM_MINUTES,
-        "OpvarmningMinOverride": MANUAL_TEAM_MINUTES,
-        "OpvarmningHalOverride": None,
-        "OpvarmningStartOverride": None,
-        "Order": _next_order(plan, hal),
-        "Manual": True,
-    })
+    plan["raw_rows"].append(engine.new_row(
+        name, "hold", hal, MANUAL_TEAM_MINUTES, _next_order(plan, hal),
+        OpvarmningMinOverride=MANUAL_TEAM_MINUTES, Manual=True,
+    ))
 
 
 def reorder_rows(plan: dict, hal: str, ordered_ids: List[str]) -> None:
@@ -349,7 +370,7 @@ def swap_warmup_time(plan: dict, dragged_id: str, target_id: str) -> None:
     if dragged is None or target is None:
         raise ActionError("Hold ikke fundet", 404)
 
-    rows_now = {r["id"]: r for r in engine.to_row_dicts(_compute(plan), plan["warmup_halls"])}
+    rows_now = _views(plan)
     dragged_now = rows_now.get(dragged_id)
     target_now = rows_now.get(target_id)
     if not dragged_now or not target_now or not dragged_now["opvarmningStart"] or not target_now["opvarmningStart"]:
@@ -364,21 +385,13 @@ def swap_warmup_time(plan: dict, dragged_id: str, target_id: str) -> None:
     dragged["OpvarmningHalOverride"] = target_now["opvarmningHalBeregnet"]
     target["OpvarmningHalOverride"] = dragged_now["opvarmningHalBeregnet"]
 
-    after = {r["id"]: r for r in engine.to_row_dicts(_compute(plan), plan["warmup_halls"])}
+    after = _views(plan)
     if after[dragged_id]["status"] != "OK" or after[target_id]["status"] != "OK":
         for r, start, hal in before:
             r["OpvarmningStartOverride"], r["OpvarmningHalOverride"] = start, hal
         raise ActionError(
             f"Byttet giver ikke tid nok: '{target['Hold']}' kan ikke nå sin opvisning med det senere tidspunkt"
         )
-
-
-def _views(plan: dict) -> dict:
-    return {r["id"]: r for r in engine.to_row_dicts(_compute(plan), plan["warmup_halls"])}
-
-
-def _ok_ids(views: dict) -> set:
-    return {rid for rid, r in views.items() if r["status"] == "OK"}
 
 
 def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
@@ -424,8 +437,7 @@ def suggest_warmups(plan: dict) -> List[dict]:
                 and r["holdtype"] not in PROTECTED_TYPES]
     suggestions = []
     for u in unplaced[:SUGGEST_MAX_TEAMS]:
-        current = u["opvarmningMinOverride"] if u["opvarmningMinOverride"] is not None else u["opvarmningMinDefault"]
-        for minutes in range(current - 1, SUGGEST_MIN_MINUTES - 1, -1):
+        for minutes in range(_effective_minutes(u) - 1, SUGGEST_MIN_MINUTES - 1, -1):
             trial = copy.deepcopy(plan)
             _find_row(trial, u["id"])["OpvarmningMinOverride"] = minutes
             after = _views(trial)
@@ -442,11 +454,6 @@ def suggest_warmups(plan: dict) -> List[dict]:
 
 SOLVE_MAX_REDUCTION = 5    # højst så mange minutter kortere pr. hold
 SOLVE_MAX_NEIGHBOURS = 6   # højst så mange hold omkring holdet forkortes
-
-
-def _effective_minutes(view: dict) -> int:
-    o = view["opvarmningMinOverride"]
-    return o if o is not None else view["opvarmningMinDefault"]
 
 
 def solve_warmups(plan: dict) -> dict:
@@ -552,8 +559,14 @@ def create_warmup_hall(plan: dict, name: str) -> None:
             plan["priority_hall"] = name
 
 
+def _check_new_hall_name(old: str, new: str, taken) -> None:
+    if new != old and new in taken:
+        raise ActionError(f"Der findes allerede en hal, der hedder '{new}'")
+
+
 def rename_warmup_hall(plan: dict, old_name: str, new_name: str) -> None:
     old, new = (old_name or "").strip(), (new_name or "").strip()
+    _check_new_hall_name(old, new, plan["warmup_halls"])
     if old in plan["warmup_halls"] and new:
         plan["warmup_halls"] = [new if h == old else h for h in plan["warmup_halls"]]
         if plan["priority_hall"] == old:
@@ -584,6 +597,7 @@ def create_show_hall(plan: dict, name: str) -> None:
 
 def rename_show_hall(plan: dict, old_name: str, new_name: str) -> None:
     old, new = (old_name or "").strip(), (new_name or "").strip()
+    _check_new_hall_name(old, new, show_hal_names(plan))
     hal = _find_show_hal(plan, old)
     if hal and new:
         hal["name"] = new
@@ -599,6 +613,7 @@ def set_show_hall_start_time(plan: dict, name: str, start_time: str) -> None:
     hal = _find_show_hal(plan, (name or "").strip())
     if hal:
         hal["startTime"] = start
+        hal["startTimeSet"] = True   # en senere fil må ikke overskrive den
 
 
 def delete_show_hall(plan: dict, name: str) -> None:

@@ -15,6 +15,7 @@ import os
 import time
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import quote
 
 import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -40,7 +41,7 @@ def load_state() -> dict:
             broken = STATE_FILE.with_name(f"{STATE_FILE.stem}.broken-{time.strftime('%Y%m%d-%H%M%S')}.json")
             os.replace(STATE_FILE, broken)
             print(f"ADVARSEL: kunne ikke læse {STATE_FILE.name} ({e}). Flyttet til {broken.name}.")
-    return actions.new_plan()
+    return actions.start_plan()
 
 
 STATE = load_state()
@@ -254,11 +255,15 @@ def delete_show_hall(payload: HallName):
 
 
 @app.get("/api/export.xlsx")
-def export_xlsx():
+def export_xlsx(name: Optional[str] = None):
+    filename = actions.export_filename(name)
+    # HTTP-headere må kun indeholde latin-1: æøå sendes i filename*, og
+    # filename er en ASCII-reserve til ældre browsere.
+    ascii_name = filename.encode("ascii", "replace").decode("ascii").replace("?", "_")
     return Response(
         actions.export_xlsx(STATE),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="opvisning_med_opvarmning.xlsx"'},
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"},
     )
 
 

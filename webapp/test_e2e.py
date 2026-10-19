@@ -6,66 +6,20 @@ Browsertest med Playwright og Microsoft Edge.
 
 Kræver: pip install playwright   (bruger den installerede Edge; ingen download)
 """
-import os
-import socket
 import subprocess
 import sys
 import tempfile
-import time
-import urllib.request
 from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
+import testkit
+from testkit import check, excel_bytes, free_port, start_server, summary, wait_for
+
 HERE = Path(__file__).parent
-PASS, FAIL = [], []
-
-
-def check(name, condition, detail=""):
-    (PASS.append(name) if condition else FAIL.append((name, detail)))
-    print(("OK   " if condition else "FEJL ") + name + (f"  ({detail})" if detail and not condition else ""))
-
-
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def wait_for(url, timeout=60):
-    end = time.time() + timeout
-    while time.time() < end:
-        try:
-            urllib.request.urlopen(url)
-            return
-        except Exception:
-            time.sleep(0.25)
-    raise RuntimeError(f"{url} svarede ikke")
-
-
-def excel_file(tmp):
-    df = pd.DataFrame({
-        "Tid": ["09:00"] + [""] * 5,
-        "Varighed": [10] * 6,
-        "Holdnavn": [f"Hold {i}" for i in range(1, 7)],
-        "Antal deltagere": [20] * 6,
-        "Alder": ["voksen"] * 6,
-    })
-    path = Path(tmp) / "program.xlsx"
-    df.to_excel(path, index=False)
-    return path
-
-
-def start_server(tmp):
-    port = free_port()
-    env = dict(os.environ, STATE_FILE=str(Path(tmp) / "state.json"), PORT=str(port))
-    proc = subprocess.Popen([sys.executable, "app.py"], cwd=HERE, env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    url = f"http://127.0.0.1:{port}/"
-    wait_for(url + "api/state")
-    return proc, url
+testkit.VERBOSE = True
 
 
 def common_flow(page, url, xlsx, dialogs, errors):
@@ -87,12 +41,47 @@ def common_flow(page, url, xlsx, dialogs, errors):
     check("stjernen gør en anden hal til prioritetshal", "Prioritetshal" in page.locator("#onb-warmup-list li").nth(1).inner_text())
     page.locator("#onb-warmup-list li").first.locator(".star").click()
     page.wait_for_function("() => STATE.priorityHall === 'Varm 1'")
-    for i, (name, start) in enumerate([("Sal A", "9.15"), ("Sal B", "10:00")], start=1):
-        page.fill("#onb-show-form input >> nth=0", name)
-        page.fill("#onb-show-form input >> nth=1", start)
-        page.click("#onb-show-form button")
-        page.wait_for_function(f"document.querySelectorAll('#onb-show-list li').length === {i}")
-    check("haller oprettet på startsiden", "start 09:15" in page.locator("#onb-show-list li").first.inner_text())
+    first = page.locator("#onb-show-list li").first
+    check("ny plan starter med opvisningshallen Hal 1 (trin 2 er klaret)",
+          page.locator("#onb-show-list li").count() == 1 and first.locator(".hall-name-input").input_value() == "Hal 1"
+          and "done" in page.get_attribute("#step-show", "class"))
+    old_time = first.locator(".hall-time-input").element_handle()
+    first.locator(".hall-name-input").fill("Sal A")
+    first.locator(".hall-name-input").press("Tab")
+    page.wait_for_function("() => STATE.showHalls[0].name === 'Sal A'")
+    # vent til listen er tegnet forfra (det gamle felt er væk)
+    page.wait_for_function("(old) => !old.isConnected", arg=old_time)
+    check("Tab efter omdøbning flytter fokus til starttiden",
+          page.evaluate("() => document.activeElement.classList.contains('hall-time-input')"))
+    page.keyboard.press("Control+A")
+    page.keyboard.type("9.15")
+    page.keyboard.press("Tab")
+    page.wait_for_function("() => STATE.showHalls[0].startTime === '09:15'")
+    page.fill("#onb-show-form input >> nth=0", "Sal B")
+    page.fill("#onb-show-form input >> nth=1", "10:00")
+    page.click("#onb-show-form button")
+    page.wait_for_function("document.querySelectorAll('#onb-show-list li').length === 2")
+    values = [page.locator("#onb-show-list .hall-name-input").nth(i).input_value() for i in range(2)]
+    times = [page.locator("#onb-show-list .hall-time-input").nth(i).input_value() for i in range(2)]
+    check("navn og starttid rettes direkte i listen", (values, times) == (["Sal A", "Sal B"], ["09:15", "10:00"]),
+          (values, times))
+    check("hver opvisningshal har sit eget felt til Excel-filen", page.locator("#onb-show-list .hall-drop").count() == 2)
+
+    n = len(dialogs)
+    second = page.locator("#onb-show-list .hall-name-input").nth(1)
+    second.fill("Sal A")
+    second.press("Tab")
+    page.wait_for_timeout(400)
+    check("to haller kan ikke hedde det samme",
+          len(dialogs) > n and "findes allerede" in dialogs[-1]
+          and page.evaluate("() => STATE.showHalls.map(h => h.name)") == ["Sal A", "Sal B"]
+          and page.locator("#onb-show-list .hall-name-input").nth(1).input_value() == "Sal B", dialogs[-1:])
+    second = page.locator("#onb-show-list .hall-name-input").nth(1)
+    second.fill("   ")
+    second.press("Tab")
+    page.wait_for_timeout(200)
+    check("et tomt navn fortrydes", page.locator("#onb-show-list .hall-name-input").nth(1).input_value() == "Sal B"
+          and page.evaluate("() => STATE.showHalls[1].name") == "Sal B")
 
     page.set_input_files("#file-input", str(xlsx))
     page.wait_for_selector("#overview-data:not(.hidden)")
@@ -133,10 +122,35 @@ def common_flow(page, url, xlsx, dialogs, errors):
           sent["varighed"] == 15 and sent["opvarmningMinOverride"] == 15 and sent["needsWarmup"], sent)
     check("navnet på et tilføjet hold kan rettes", page.locator("#table-body input.team-name").count() == 1)
 
+    import datetime
+    today = datetime.date.today().strftime("%d-%m-%Y")
+    page.click("#btn-export")
+    page.wait_for_selector("#export-dialog.show")
+    page.wait_for_function("() => document.activeElement.id === 'export-name'")
+    check("Hent Excel-plan åbner en boks med et forslag til filnavn",
+          page.input_value("#export-name") == f"Opvarmningsplan Sal A og Sal B {today}", page.input_value("#export-name"))
+    page.click("#export-dialog >> text=Annullér")
+    page.wait_for_selector("#export-dialog", state="hidden")
+    check("Annullér lukker boksen uden at hente noget", True)
+
+    page.click("#btn-export")
+    page.wait_for_selector("#export-dialog.show")
+    page.fill("#export-name", "Lørdag: Arena/Hal2.xlsx")
     with page.expect_download() as dl:
-        page.click("#btn-export")
-    check("eksport henter opvisning_med_opvarmning.xlsx",
-          dl.value.suggested_filename == "opvisning_med_opvarmning.xlsx")
+        page.press("#export-name", "Enter")
+    check("filen hentes med brugerens navn, gjort sikkert",
+          dl.value.suggested_filename == "Lørdag Arena Hal2.xlsx", dl.value.suggested_filename)
+    page.wait_for_selector("#export-dialog", state="hidden")
+    page.click("#btn-export")
+    page.wait_for_selector("#export-dialog.show")
+    check("det sidst brugte navn huskes", page.input_value("#export-name") == "Lørdag: Arena/Hal2",
+          page.input_value("#export-name"))
+    page.fill("#export-name", "   ")
+    with page.expect_download() as dl:
+        page.click("#export-dialog button[type=submit]")
+    check("et tomt navn giver forslaget som filnavn",
+          dl.value.suggested_filename == f"Opvarmningsplan Sal A og Sal B {today}.xlsx", dl.value.suggested_filename)
+    page.wait_for_selector("#export-dialog", state="hidden")
     data = Path(dl.value.path()).read_bytes()
     sheets = list(pd.read_excel(BytesIO(data), sheet_name=None))
     check("eksport har ét ark pr. opvisningshal først", sheets[:2] == ["Opvisning Sal A", "Opvisning Sal B"], sheets)
@@ -228,7 +242,9 @@ def browser_only(browser, context, page, url, dialogs):
     page.click("#btn-clear-data")   # bekræftelsen accepteres af dialog-handleren
     page.wait_for_selector("#onboarding:not(.hidden)", timeout=120_000)
     left = page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('opvarmning_'))")
-    check("Slet alle data fjerner alt og viser 'Kom i gang'", left == [] and page.evaluate("() => STATE.warmupHalls.length") == 0, left)
+    check("Slet alle data fjerner alt og viser 'Kom i gang' med Hal 1",
+          left == [] and page.evaluate("() => STATE.warmupHalls.length") == 0
+          and page.evaluate("() => STATE.showHalls.map(h => h.name)") == ["Hal 1"], left)
 
     page.click("#btn-halls")
     page.wait_for_selector("#halls-panel.show")
@@ -287,10 +303,8 @@ def new_features(page, tmp, dialogs):
     api(page, "DELETE", "/api/halls/warmup", {"name": "Varm 2"})
     api(page, "POST", "/api/halls/show/starttime", {"name": "Sal A", "startTime": "09:00"})
     refresh(page)
-    df = pd.DataFrame({"Tid": ["09:00"] + [""] * 5, "Varighed": [12] * 6, "Holdnavn": list("ABCDEF"),
-                       "Antal deltagere": [20] * 6})
     path = Path(tmp) / "tolv.xlsx"
-    df.to_excel(path, index=False)
+    path.write_bytes(excel_bytes([(c, 12) for c in "ABCDEF"]))
     page.set_input_files("#file-input", str(path))
     page.wait_for_function("() => STATE.rows.length === 6")
     page.click(".rail-link[data-view=oversigt]")
@@ -335,6 +349,82 @@ def new_features(page, tmp, dialogs):
     page.wait_for_function("() => STATE.rows.find(r => r.hold === 'B').status === 'OK'")
     check("ingen hold uden plads -> ingen forslag og ingen rød række",
           page.is_hidden("#suggestions") and page.locator(".tl-lane-problem").count() == 0)
+
+
+def drop_files(page, selector, files):
+    """Slipper filer fra 'computeren' på elementet. files: [(navn, bytes)]."""
+    import base64
+    page.evaluate("""([sel, files]) => {
+      const dt = new DataTransfer();
+      for (const [name, b64] of files) {
+        dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], name));
+      }
+      const el = document.querySelector(sel);
+      for (const type of ["dragenter", "dragover", "drop"]) {
+        el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+      }
+    }""", [selector, [(name, base64.b64encode(data).decode()) for name, data in files]])
+
+
+def drop_tests(page, tmp, dialogs):
+    """Træk Excel-filer ind på den hal, de hører til."""
+    api(page, "POST", "/api/reset")
+    for hal in ("Sal B", "Sal C"):
+        api(page, "POST", "/api/halls/show", {"name": hal})
+    refresh(page)
+    page.click(".rail-link[data-view=oversigt]")
+    page.wait_for_selector("#onboarding:not(.hidden)")
+    rows_in = lambda hal: page.evaluate(f"() => STATE.rows.filter(r => r.opvisningHal === '{hal}')"
+                                        ".sort((a, b) => a.order - b.order).map(r => r.hold)")
+
+    drop_files(page, "#onb-show-list li:nth-child(2) .hall-drop",
+               [("fredag.xlsx", excel_bytes(["B1", "B2"], "13:00")), ("lørdag.xlsx", excel_bytes(["B3"]))])
+    page.wait_for_function("() => STATE.rows.length === 3")
+    check("to filer sluppet på Sal B lander begge i Sal B, i rækkefølge", rows_in("Sal B") == ["B1", "B2", "B3"]
+          and rows_in("Sal A") == [], rows_in("Sal B"))
+    check("en tom hal får starttiden fra filens første Tid",
+          page.evaluate("() => STATE.showHalls.find(h => h.name === 'Sal B').startTime") == "13:00")
+
+    page.wait_for_selector("#overview-data:not(.hidden)")
+    drop_files(page, "#show-hall-summary li:nth-child(3) .hall-row", [("c.xlsx", excel_bytes(["C1"]))])
+    page.wait_for_function("() => STATE.rows.length === 4")
+    check("en fil sluppet på en hal i oversigten lander i den hal", rows_in("Sal C") == ["C1"])
+
+    page.click(".rail-link[data-view=program]")
+    drop_files(page, "#hal-tabs .tab:nth-child(1)", [("a.xlsx", excel_bytes(["A1"]))])
+    page.wait_for_function("() => STATE.rows.length === 5")
+    check("en fil sluppet på en fane under Program lander i den hal, og fanen åbnes",
+          rows_in("Sal A") == ["A1"] and page.evaluate("() => activeHal") == "Sal A")
+
+    n = len(dialogs)
+    drop_files(page, "#hal-tabs .tab:nth-child(2)", [("noter.pdf", b"%PDF")])
+    page.wait_for_timeout(300)
+    check("andre filer end .xlsx afvises med besked",
+          len(dialogs) > n and "Kun Excel-filer" in dialogs[-1] and page.evaluate("() => STATE.rows.length") == 5)
+
+    url = page.url
+    drop_files(page, "main", [("x.xlsx", excel_bytes(["X"]))])
+    page.wait_for_timeout(300)
+    check("en fil sluppet uden for en hal gør ingenting", page.url == url and page.evaluate("() => STATE.rows.length") == 5)
+
+    page.locator("#hal-tabs .tab", has_text="Sal C").click()
+    late = Path(tmp) / "sen.xlsx"
+    late.write_bytes(excel_bytes(["C2"]))
+    with page.expect_file_chooser() as fc:
+        page.click("#btn-upload")
+    fc.value.set_files(str(late))
+    page.wait_for_function("() => STATE.rows.length === 6")
+    check("Indlæs Excel under Program lægger filen i den åbne hal", rows_in("Sal C") == ["C1", "C2"])
+
+    for hal in ("Sal A", "Sal B", "Sal C"):
+        api(page, "DELETE", "/api/halls/show", {"name": hal})
+    refresh(page)
+    with page.expect_file_chooser() as fc:
+        page.click("#btn-upload")
+    fc.value.set_files(str(late))
+    page.wait_for_function("() => STATE.rows.length === 1")
+    check("uden haller opretter Indlæs Excel hallen Hal 1",
+          page.evaluate("() => STATE.showHalls.map(h => h.name)") == ["Hal 1"] and rows_in("Hal 1") == ["C2"])
 
 
 def bulk_tests(page, dialogs):
@@ -390,10 +480,8 @@ def solve_tests(page, tmp):
     """Find løsning: forkort holdet og holdene omkring det, vis først, brug bagefter."""
     api(page, "POST", "/api/reset")
     refresh(page)
-    df = pd.DataFrame({"Tid": ["09:00"] + [""] * 5, "Varighed": [12] * 6, "Holdnavn": list("ABCDEF"),
-                       "Antal deltagere": [20] * 6})
     path = Path(tmp) / "tolv2.xlsx"
-    df.to_excel(path, index=False)
+    path.write_bytes(excel_bytes([(c, 12) for c in "ABCDEF"]))
     page.set_input_files("#file-input", str(path))
     page.wait_for_function("() => STATE.rows.length === 6")
     page.click(".rail-link[data-view=oversigt]")
@@ -430,7 +518,8 @@ def solve_tests(page, tmp):
 
 def run(mode):
     tmp = tempfile.mkdtemp()
-    xlsx = excel_file(tmp)
+    xlsx = Path(tmp) / "program.xlsx"
+    xlsx.write_bytes(excel_bytes([f"Hold {i}" for i in range(1, 7)]))
     procs = []
     try:
         if mode == "server":
@@ -459,6 +548,7 @@ def run(mode):
             new_features(page, tmp, dialogs)
             bulk_tests(page, dialogs)
             solve_tests(page, tmp)
+            drop_tests(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))
             check("ingen JavaScript-fejl", not errors, errors)
@@ -470,8 +560,7 @@ def run(mode):
             proc.terminate()
             proc.wait(timeout=10)
 
-    print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
-    return not FAIL
+    return summary()
 
 
 if __name__ == "__main__":

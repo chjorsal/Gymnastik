@@ -7,20 +7,8 @@ Kør: python test_engine.py
 import sys
 from datetime import datetime, timedelta
 
-import pandas as pd
-
 import engine
-
-PASS = []
-FAIL = []
-
-
-def check(name, condition, detail=""):
-    if condition:
-        PASS.append(name)
-    else:
-        FAIL.append((name, detail))
-        print(f"FAIL: {name}  {detail}")
+from testkit import check, summary
 
 
 def run():
@@ -519,12 +507,7 @@ def run():
     # ============================================================
     # summary
     # ============================================================
-    print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
-    if FAIL:
-        print("\nFAILED:")
-        for name, detail in FAIL:
-            print(f"  - {name}: {detail}")
-    return len(FAIL) == 0
+    return summary()
 
 
 if __name__ == "__main__":

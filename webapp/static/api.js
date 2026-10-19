@@ -48,8 +48,8 @@ const Api = (() => {
       if (hal) fd.append("show_hal", hal);
       return readJson(await fetch("/api/upload", { method: "POST", body: fd }));
     },
-    async exportPlan() {
-      window.location.href = "/api/export.xlsx";
+    async exportPlan(name) {
+      window.location.href = `/api/export.xlsx?name=${encodeURIComponent(name || "")}`;
     },
     onExternalChange() {},
     async savePlanFile() { throw new ApiError("Kun i browserudgaven.", 400); },
@@ -193,12 +193,11 @@ const Api = (() => {
       }
       return answer(bridge.upload_files(planJson, JSON.stringify(paths), hal || ""));
     },
-    async exportPlan() {
+    async exportPlan(name) {
       const out = "/tmp/opvisning_med_opvarmning.xlsx";
-      bridge.export_to(planJson, out);
+      const { filename } = JSON.parse(bridge.export_to(planJson, out, name || ""));
       const bytes = py.FS.readFile(out);
-      download(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-        "opvisning_med_opvarmning.xlsx");
+      download(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename);
     },
     onExternalChange(cb) { externalChange = cb; },
     async savePlanFile() {
@@ -226,7 +225,7 @@ const Api = (() => {
     start: (onStatus) => transport.start(onStatus),
     request: (method, url, body) => transport.request(method, url, body),
     upload: (files, hal) => transport.upload(files, hal),
-    exportPlan: () => transport.exportPlan(),
+    exportPlan: (name) => transport.exportPlan(name),
     onExternalChange: (cb) => transport.onExternalChange(cb),
     savePlanFile: () => transport.savePlanFile(),
     openPlanFile: (text) => transport.openPlanFile(text),

@@ -26,7 +26,7 @@ def _dump(obj) -> str:
 
 
 def _plan(plan_json: str) -> dict:
-    return actions.import_plan(plan_json) if plan_json else actions.new_plan()
+    return actions.import_plan(plan_json) if plan_json else actions.start_plan()
 
 
 def _result(plan: dict) -> str:
@@ -67,9 +67,11 @@ def upload_files(plan_json: str, paths_json: str, show_hal: str) -> str:
         return _error(e)
 
 
-def export_to(plan_json: str, out_path: str) -> str:
+def export_to(plan_json: str, out_path: str, name: str = "") -> str:
+    """Skriver Excel-planen til out_path og returnerer det filnavn, den skal
+    hentes som (brugerens navn gjort sikkert)."""
     Path(out_path).write_bytes(actions.export_xlsx(_plan(plan_json)))
-    return _dump({"ok": True})
+    return _dump({"ok": True, "filename": actions.export_filename(name)})
 
 
 def import_plan(text: str) -> str:
