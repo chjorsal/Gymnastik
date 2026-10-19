@@ -162,6 +162,30 @@ def run():
     check("upload_to_halls creates a hall that does not exist yet",
           [h["name"] for h in mp["show_halls"]] == ["Hal 1", "Hal 2", "Ny hal"])
 
+    # ---------- et hold låst til en hal går forud for hold, der kan flytte ----------
+    # Som "Larving": A kan varme op hvor som helst og går på lidt før L. L er
+    # låst til V1 (holdet kan ikke være i V2). Før tog A pladsen i V1, så L
+    # stod uden plads, selv om A lige så godt kunne være i V2.
+    lk = actions.new_plan()
+    for hal in ("V1", "V2"):
+        actions.create_warmup_hall(lk, hal)
+    for sal, team, start in (("S1", "A", "10:00"), ("S2", "L", "10:10")):
+        actions.create_show_hall(lk, sal)
+        actions.set_show_hall_start_time(lk, sal, start)
+        actions.upload(lk, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    ids = {r["Hold"]: r["id"] for r in lk["raw_rows"]}
+    for team in ("A", "L"):
+        actions.patch_row(lk, ids[team], "opvarmningMin", 30)
+    actions.patch_row(lk, ids["L"], "opvarmningHal", "V1")
+    views = {r["hold"]: r for r in actions.payload(lk)["rows"]}
+    check("a team locked to a hall gets room there; the free team moves to the other hall",
+          (views["L"]["status"], views["L"]["opvarmningHalBeregnet"]) == ("OK", "V1")
+          and (views["A"]["status"], views["A"]["opvarmningHalBeregnet"]) == ("OK", "V2"),
+          {k: (v["status"], v["opvarmningHalBeregnet"], v["opvarmningStart"]) for k, v in views.items()})
+    actions.patch_row(lk, ids["L"], "opvarmningHal", "")
+    views = {r["hold"]: r for r in actions.payload(lk)["rows"]}
+    check("without the lock both teams still get room", all(v["status"] == "OK" for v in views.values()))
+
     # ---------- omdøb haller: navne skal være unikke ----------
     rp = plan_with_halls()
     actions.upload(rp, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal A")
