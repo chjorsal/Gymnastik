@@ -35,6 +35,7 @@ const ICONS = {
   starFilled: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   starOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><line x1="12" y1="16" x2="12" y2="21"/></svg>',
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>',
 };
 
@@ -231,6 +232,8 @@ async function init() {
   document.getElementById("brand-home").addEventListener("click", () => setView("oversigt"));
   document.getElementById("bulk-move").addEventListener("click", onBulkMove);
   document.getElementById("btn-solve").addEventListener("click", onSolve);
+  // Løsningen vises på oversigten, sammen med forslagene.
+  document.getElementById("btn-solve-warmup").addEventListener("click", () => { setView("oversigt"); onSolve(); });
   document.getElementById("bulk-delete").addEventListener("click", onBulkDelete);
   document.getElementById("bulk-clear").addEventListener("click", () => {
     clearSelection();
@@ -500,7 +503,7 @@ function renderPageHead() {
   if (currentView === "oversigt") {
     if (!teams) {
       title.textContent = "Kom i gang";
-      sub.textContent = "Lav en opvarmningsplan til dagens opvisninger i fire trin.";
+      sub.textContent = "Tre trin, så er opvarmningsplanen klar.";
     } else {
       title.textContent = "Oversigt";
       sub.textContent = `${plural(teams, "hold", "hold")} i ${plural(STATE.showHalls.length, "opvisningshal", "opvisningshaller")}, `
@@ -508,10 +511,10 @@ function renderPageHead() {
     }
   } else if (currentView === "program") {
     title.textContent = "Program";
-    sub.textContent = "Træk i rækkerne for at ændre rækkefølgen. Tiderne regnes ud automatisk.";
+    sub.textContent = "";
   } else {
     title.textContent = "Opvarmning";
-    sub.textContent = "Træk et hold hen på en anden hal for at flytte det, eller op på et tidligere hold for at bytte tid.";
+    sub.textContent = "";
   }
 }
 
@@ -540,7 +543,7 @@ function warmupHallItem(name, index, where) {
   const li = document.createElement("li");
   li.className = "hall-item";
   const star = iconButton(isPrio ? "starFilled" : "starOutline",
-    isPrio ? "Prioritetshal: efterskoler varmer op her først" : `Gør ${name} til prioritetshal`,
+    isPrio ? "Efterskolerne varmer op her først" : `Lad efterskolerne varme op i ${name} først`,
     () => update(apiJSON("/api/halls/warmup/priority", "POST", { name })), "star" + (isPrio ? " active" : ""));
   star.setAttribute("aria-pressed", String(isPrio));
   li.append(star, inlineInput(name, "Navn på opvarmningshal", "hall-name-input", `${where}-warmup:${index}`,
@@ -548,7 +551,7 @@ function warmupHallItem(name, index, where) {
   if (isPrio) {
     const prio = document.createElement("span");
     prio.className = "prio";
-    prio.textContent = "Prioritetshal";
+    prio.textContent = "Efterskoler først";
     li.appendChild(prio);
   }
   li.appendChild(iconButton("close", `Slet ${name}`, confirmAndRun(
@@ -587,7 +590,9 @@ function showHallItem(hal, index, where) {
     const drop = document.createElement("button");
     drop.type = "button";
     drop.className = "hall-drop";
-    drop.append(icon("file"), document.createTextNode("Træk Excel-filen hertil, eller klik for at vælge den"));
+    const choose = document.createElement("strong");
+    choose.textContent = "vælg fil";
+    drop.append(icon("file"), document.createTextNode("Træk Excel-filen hertil eller "), choose);
     drop.addEventListener("click", () => chooseFiles(hal.name));
     li.appendChild(drop);
   }
@@ -636,8 +641,8 @@ function renderOverview() {
 function renderOnboarding() {
   const steps = [
     ["step-warmup", STATE.warmupHalls.length > 0],
-    ["step-show", STATE.showHalls.length > 0],
-    ["step-upload", false],
+    ["step-show", false],
+    ["step-check", false],
   ];
   const current = steps.find(([, done]) => !done);
   steps.forEach(([id, done]) => {
@@ -1004,7 +1009,8 @@ function renderShowHallSummary() {
 
 // ---------- Faner ----------
 
-function tabButton(name, active, problemTitle, onClick) {
+// En fane med navn og antal hold (fx "Arena 38").
+function tabButton(name, count, active, problemTitle, onClick) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "tab" + (active ? " active" : "") + (problemTitle ? " has-problem" : "");
@@ -1012,7 +1018,11 @@ function tabButton(name, active, problemTitle, onClick) {
     btn.appendChild(icon("warning"));
     btn.title = problemTitle;
   }
-  btn.appendChild(document.createTextNode(name));
+  const badge = document.createElement("span");
+  badge.className = "tab-count";
+  badge.textContent = count;
+  badge.setAttribute("aria-label", plural(count, "hold", "hold"));
+  btn.append(document.createTextNode(name), badge);
   btn.addEventListener("click", onClick);
   return btn;
 }
@@ -1020,7 +1030,8 @@ function tabButton(name, active, problemTitle, onClick) {
 function renderHalTabs() {
   document.getElementById("hal-tabs").replaceChildren(...STATE.showHalls.map((hal) => {
     const hasProblem = STATE.rows.some((r) => r.opvisningHal === hal.name && r.problemMessage);
-    const btn = tabButton(hal.name, hal.name === activeHal,
+    const count = STATE.rows.filter((r) => r.opvisningHal === hal.name && r.needsWarmup).length;
+    const btn = tabButton(hal.name, count, hal.name === activeHal,
       hasProblem ? "Der er hold i denne hal der ikke kan placeres" : "", () => setActiveHal(hal.name));
     makeFileDropTarget(btn, hal.name);
     return btn;
@@ -1031,7 +1042,8 @@ function renderWarmupHalTabs() {
   ensureActiveWarmupHal();
   document.getElementById("warmup-hal-tabs").replaceChildren(...STATE.warmupHalls.map((name) => {
     const hasProblem = STATE.rows.some((r) => r.opvarmningHalOverride === name && r.problemMessage);
-    const btn = tabButton(name, name === activeWarmupHal,
+    const count = STATE.rows.filter((r) => r.status === "OK" && r.opvarmningHalBeregnet === name).length;
+    const btn = tabButton(name, count, name === activeWarmupHal,
       hasProblem ? "Et hold der er låst til denne hal kan ikke få plads" : "", () => setActiveWarmupHal(name));
     makeDropTarget(btn, (draggedId) => patchRow(draggedId, "opvarmningHal", name));
     return btn;
@@ -1067,11 +1079,10 @@ function buildMoveHalSelect(row) {
   return moveSelect;
 }
 
-// De sidste fire celler, som begge opvarmningstabeller har.
+// De sidste tre celler, som begge opvarmningstabeller har.
 function appendWarmupCells(tr, row) {
   tr.append(
-    readonlyCell(row.opvisningHal),
-    readonlyCell(row.opvisningTid, "narrow-col"),
+    readonlyCell(`${row.opvisningHal} ${row.opvisningTid}`, "narrow-col"),
     cell(buildWarmInput(row, "warmup-view"), "narrow-col"),
     cell(buildMoveHalSelect(row), "narrow-col"),
   );
@@ -1082,17 +1093,20 @@ function renderUnplacedWarmup() {
   const tbody = document.getElementById("unplaced-warmup-body");
   const unplaced = unplacedRows();
   section.classList.toggle("hidden", !unplaced.length);
+  document.getElementById("unplaced-title").replaceChildren(icon("warning"),
+    document.createTextNode(`${plural(unplaced.length, "hold mangler", "hold mangler")} plads til opvarmning`));
   tbody.replaceChildren(...unplaced.map((row) => {
     const tr = document.createElement("tr");
-    tr.className = "table-danger";
+    tr.className = "row-problem";
     tr.dataset.id = row.id;
     makeDragSource(tr, row.id);
 
     const holdText = dragHandleText(row.hold);
     holdText.classList.add("hold-name-readonly");
-    const unpin = buildUnpinButton(row);
-    if (unpin) holdText.appendChild(unpin);
-    tr.appendChild(cell(holdText, "hold-col"));
+    const tdHold = cell(holdText, "hold-col");
+    const pin = buildPinNote(row);
+    if (pin) tdHold.appendChild(pin);
+    tr.appendChild(tdHold);
     appendWarmupCells(tr, row);
     return tr;
   }));
@@ -1118,17 +1132,19 @@ function renderWarmupTable() {
   document.getElementById("warmup-table-body").replaceChildren(...rows.map((row) => {
     const tr = document.createElement("tr");
     tr.dataset.id = row.id;
-    tr.title = "Træk til en hal-fane for at flytte holdet, eller træk hen på et tidligere hold i listen for at bytte opvarmningstid med det";
+    tr.title = "Træk holdet hen på en anden hal-fane, eller hen på et tidligere hold for at bytte tid";
     makeDragSource(tr, row.id);
     makeDropTarget(tr, (draggedId) => {
       if (draggedId === row.id) return;
       return swapWarmupTime(draggedId, row.id);
     });
 
-    const tdTime = readonlyCell(`${row.opvarmningStart}–${row.opvarmningSlut}`, "narrow-col");
-    const unpin = buildUnpinButton(row);
-    if (unpin) tdTime.appendChild(unpin);
-    tr.append(tdTime, cell(dragHandleText(row.hold), "readonly"));
+    const tdTime = readonlyCell(`${row.opvarmningStart}–${row.opvarmningSlut}`, "narrow-col warmup-time");
+    const pin = buildPinNote(row);
+    if (pin) tdTime.appendChild(pin);
+    const holdText = dragHandleText(row.hold);
+    holdText.classList.add("hold-name-readonly");
+    tr.append(tdTime, cell(holdText, "hold-col"));
     appendWarmupCells(tr, row);
     return tr;
   }));
@@ -1227,7 +1243,7 @@ function renderTableBody(rows) {
     const tr = document.createElement("tr");
     tr.dataset.id = row.id;
     if (!row.needsWarmup) tr.classList.add("row-special");
-    if (row.problemMessage) tr.classList.add("table-danger");
+    if (row.problemMessage) tr.classList.add("row-problem");
     if (selectedIds.has(row.id)) tr.classList.add("selected");
 
     const cb = document.createElement("input");
@@ -1301,6 +1317,7 @@ function renderTableBody(rows) {
     ), "row-delete icon-btn-danger");
 
     const tdDrag = cell(icon("drag"), "drag-col");
+    tdDrag.title = "Træk for at flytte holdet";
     tr.append(
       cell(cb, "select-col"),
       tdDrag,
@@ -1336,12 +1353,20 @@ function swapWarmupTime(draggedId, targetId) {
   return update(apiJSON("/api/rows/swap-warmup-time", "POST", { draggedId, targetId }));
 }
 
-// Lille knap der fjerner et fast opvarmningstidspunkt (sat ved træk-og-slip),
-// så holdet igen placeres automatisk. null hvis holdet ikke har et.
-function buildUnpinButton(row) {
+// "fast tid · slip" under et hold, der er trukket til et bestemt tidspunkt.
+// "slip" gør tiden automatisk igen. null hvis holdet ikke har en fast tid.
+function buildPinNote(row) {
   if (!row.opvarmningStartOverride) return null;
-  return iconButton("close", `Fast tidspunkt ${row.opvarmningStartOverride} — klik for at gøre det automatisk igen`,
-    () => patchRow(row.id, "opvarmningStart", ""));
+  const note = document.createElement("div");
+  note.className = "pin-note";
+  const release = document.createElement("button");
+  release.type = "button";
+  release.className = "pin-release";
+  release.textContent = "slip";
+  release.title = `Holdet er låst til kl. ${row.opvarmningStartOverride}. Klik for at lade det blive placeret af sig selv igen.`;
+  release.addEventListener("click", () => patchRow(row.id, "opvarmningStart", ""));
+  note.append(icon("pin"), document.createTextNode("fast tid ·"), release);
+  return note;
 }
 
 init();
