@@ -172,37 +172,35 @@ def compute_plan(
             placed = None
         results[rid] = _book(bookings, r["Hold"], placed)
 
-    # PASS 1: efterskole (uden manuelt tidspunkt) i prioritetshallen
-    eft_rows = df_plan[(df_plan["Holdtype"] == "efterskole") & ~has_start_override].sort_values("OpvisningStart")
+    def place_in_window(r, halls_to_try, first_max_early):
+        """Søger en plads i vinduet før opvisningen: først højst
+        first_max_early min før, så op til MAX_EARLY_TOTAL_MIN."""
+        args = (bookings, halls_to_try, warm_min_for(r), r["OpvisningStart"], gang_tid(), SKIFTE_I_SLOTTET_MIN)
+        placed = try_place(*args, first_max_early)
+        if not placed and first_max_early < MAX_EARLY_TOTAL_MIN:
+            placed = try_place(*args, MAX_EARLY_TOTAL_MIN)
+        return _book(bookings, r["Hold"], placed)
+
+    # PASS 1: hold som brugeren har låst til én hal (uden fast tidspunkt).
+    # De kan kun være dér, så de får deres plads, før hold der kan varme op
+    # hvor som helst — ellers kan et frit hold tage den sidste plads i hallen.
+    has_hal_override = df_plan.apply(lambda r: hal_override_for(r) is not None, axis=1)
+    hal_locked = df_plan[has_hal_override & ~has_start_override].sort_values("OpvisningStart")
+    for _, r in hal_locked.iterrows():
+        first = MAX_EARLY_TOTAL_MIN if r["Holdtype"] == "efterskole" else MAX_EARLY_MIN
+        results[r["id"]] = place_in_window(r, [hal_override_for(r)], first)
+
+    free = ~has_start_override & ~has_hal_override
+
+    # PASS 2: efterskoler, prioritetshallen først
+    eft_rows = df_plan[(df_plan["Holdtype"] == "efterskole") & free].sort_values("OpvisningStart")
     for _, r in eft_rows.iterrows():
-        rid = r["id"]
-        warm_min = warm_min_for(r)
-        walk_min = gang_tid()
-        pinned_hal = hal_override_for(r)
-        if pinned_hal:
-            placed = try_place(bookings, [pinned_hal], warm_min, r["OpvisningStart"], walk_min, 0, MAX_EARLY_TOTAL_MIN)
-        else:
-            placed = try_place(bookings, halls_prio_first, warm_min, r["OpvisningStart"], walk_min, 0, 15)
-        results[rid] = _book(bookings, r["Hold"], placed)
+        results[r["id"]] = _book(bookings, r["Hold"], try_place(
+            bookings, halls_prio_first, warm_min_for(r), r["OpvisningStart"], gang_tid(), 0, 15))
 
-    # PASS 2: alle andre hold (aldrig efterskole — de er filtreret fra
-    # non_eft_plan ovenfor, så der er ingen efterskole-gren her)
-    non_eft_plan = df_plan[(df_plan["Holdtype"] != "efterskole") & ~has_start_override]
-    for _, r in non_eft_plan.iterrows():
-        rid = r["id"]
-        warm_min = warm_min_for(r)
-        walk_min = gang_tid()
-        skifte = SKIFTE_I_SLOTTET_MIN
-        max_early = MAX_EARLY_MIN
-
-        pinned_hal = hal_override_for(r)
-        halls_to_try = [pinned_hal] if pinned_hal else warmup_halls
-        placed = try_place(bookings, halls_to_try, warm_min, r["OpvisningStart"], walk_min, skifte, max_early)
-
-        if not placed:
-            placed = try_place(bookings, halls_to_try, warm_min, r["OpvisningStart"], walk_min, skifte, MAX_EARLY_TOTAL_MIN)
-
-        results[rid] = _book(bookings, r["Hold"], placed)
+    # PASS 3: alle andre hold, i den rækkefølge de går på
+    for _, r in df_plan[(df_plan["Holdtype"] != "efterskole") & free].iterrows():
+        results[r["id"]] = place_in_window(r, warmup_halls, MAX_EARLY_MIN)
 
     # Skriv alle resultater i ét hug (i stedet for én maske pr. hold).
     placed = {rid: res for rid, res in results.items() if res}
