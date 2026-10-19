@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=50">
+<link rel="stylesheet" href="style.css?v=51">
 </head>
 <body>
 <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -95,7 +95,7 @@
             <span class="step-mark"></span>
             <div class="step-body">
               <h2 class="step-title">Hvor optræder holdene — og hvornår starter programmet?</h2>
-              <p class="step-text">Træk hver Excel-fil ind på sin hal. Eller indlæs det hele i én hal og fordel holdene bagefter under Program.</p>
+              <p class="step-text">Læg hver Excel-fil klar under sin hal. Eller læg det hele i én hal og fordel holdene bagefter under Program.</p>
               <ul id="onb-show-list" class="hall-list"></ul>
               <form id="onb-show-form" class="add-form">
                 <input type="text" class="form-control" placeholder="Navn på opvisningshal" aria-label="Navn på opvisningshal" required>
@@ -110,8 +110,12 @@
           <li id="step-check" class="step">
             <span class="step-mark"></span>
             <div class="step-body">
-              <h2 class="step-title">Tjek planen og hent den</h2>
-              <p class="step-text">Opvarmningen fordeles af sig selv, så snart holdene er indlæst.</p>
+              <h2 class="step-title">Lav planen</h2>
+              <p class="step-text">Når filerne ligger klar under hallerne, fordeles opvarmningen af sig selv.</p>
+              <button id="btn-make-plan" type="button" class="btn btn-primary btn-lg" disabled>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Lav opvarmningsplan
+              </button>
             </div>
           </li>
         </ol>
@@ -342,7 +346,7 @@
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
-<script src="api.js?v=7"></script>
-<script src="app.js?v=50"></script>
+<script src="api.js?v=8"></script>
+<script src="app.js?v=51"></script>
 </body>
 </html>

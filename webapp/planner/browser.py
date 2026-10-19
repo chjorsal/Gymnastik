@@ -67,6 +67,19 @@ def upload_files(plan_json: str, paths_json: str, show_hal: str) -> str:
         return _error(e)
 
 
+def upload_files_to_halls(plan_json: str, items_json: str) -> str:
+    """items: [[sti, hal], ...] — filerne lægges i hver deres hal på én gang."""
+    try:
+        plan = _plan(plan_json)
+        groups = {}
+        for path, hal in json.loads(items_json):
+            groups.setdefault(hal, []).append((Path(path).name, Path(path).read_bytes()))
+        actions.upload_to_halls(plan, list(groups.items()))
+        return _result(plan)
+    except actions.ActionError as e:
+        return _error(e)
+
+
 def export_to(plan_json: str, out_path: str, name: str = "") -> str:
     """Skriver Excel-planen til out_path og returnerer det filnavn, den skal
     hentes som (brugerens navn gjort sikkert)."""

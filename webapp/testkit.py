@@ -12,6 +12,8 @@ from pathlib import Path
 import pandas as pd
 
 HERE = Path(__file__).parent
+# Windows-konsollen kan ikke altid vise fx ✕ — erstat tegnet i stedet for at stoppe testen.
+sys.stdout.reconfigure(errors="replace")
 PASS, FAIL = [], []
 VERBOSE = False   # True: skriv også de tjek, der består (bruges af browsertesten)
 

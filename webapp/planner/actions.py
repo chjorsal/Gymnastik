@@ -255,6 +255,21 @@ def upload(plan: dict, files: List[Tuple[str, bytes]], show_hal: Optional[str] =
         plan["raw_rows"].extend(rows)
 
 
+def upload_to_halls(plan: dict, groups: List[Tuple[str, List[Tuple[str, bytes]]]]) -> None:
+    """Indlæser filer i flere opvisningshaller på én gang ("Lav opvarmningsplan"
+    på Kom i gang). groups: [(hal, [(filnavn, indhold)])]. Er blot én fil
+    ugyldig, ændres planen slet ikke."""
+    if not any(files for _, files in groups):
+        raise ActionError("Læg mindst én Excel-fil klar under en opvisningshal")
+    trial = copy.deepcopy(plan)
+    for hal, files in groups:
+        if not (hal or "").strip():
+            raise ActionError("Vælg hvilken opvisningshal filen skal i")
+        upload(trial, files, hal)
+    plan.clear()
+    plan.update(trial)
+
+
 def patch_row(plan: dict, row_id: str, field: str, value=None) -> None:
     if field not in EDITABLE_FIELD_MAP:
         raise ActionError(f"Ukendt felt: {field}")

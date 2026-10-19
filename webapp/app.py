@@ -149,6 +149,17 @@ async def upload(files: List[UploadFile] = File(...), show_hal: Optional[str] = 
     return run_action(actions.upload, data, show_hal)
 
 
+@app.post("/api/upload-halls")
+async def upload_halls(files: List[UploadFile] = File(...), halls: List[str] = Form(...)):
+    """Filer til flere haller på én gang: halls[i] er hallen for files[i]."""
+    if len(files) != len(halls):
+        return JSONResponse({"error": "Hver fil skal have en opvisningshal"}, status_code=400)
+    groups = {}
+    for f, hal in zip(files, halls):
+        groups.setdefault(hal, []).append((f.filename, await f.read()))
+    return run_action(actions.upload_to_halls, list(groups.items()))
+
+
 @app.patch("/api/rows/{row_id}")
 def patch_row(row_id: str, patch: RowPatch):
     return run_action(actions.patch_row, row_id, patch.field, patch.value)

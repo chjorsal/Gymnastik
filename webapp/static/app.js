@@ -22,8 +22,13 @@ let currentView = "oversigt";
 const selectedIds = new Set();
 let lastSelectIndex = null;
 let activeWarmupHal = readSetting(ACTIVE_WARMUP_HAL_KEY);
-// Hallen, som filerne fra filvælgeren skal i (sættes, lige før den åbnes).
+// Hallen, som filerne fra filvælgeren skal i, og hvad der skal ske med dem
+// (sættes, lige før den åbnes). Uden handler indlæses de med det samme.
 let uploadTarget = null;
+let fileHandler = null;
+// Kom i gang: filer lagt klar pr. opvisningshal, indlæses samlet med
+// "Lav opvarmningsplan". Kun i hukommelsen — forsvinder ved genindlæsning.
+const pendingFiles = new Map();
 
 // ---------- Ikoner ----------
 // Små håndrullede SVG-ikoner (stroke-baseret, arver farve via currentColor) —
@@ -154,8 +159,8 @@ function makeDropTarget(el, onDrop) {
 }
 
 // Gør et element til et sted, man kan slippe Excel-filer: alle filerne
-// lægges i opvisningshallen hal.
-function makeFileDropTarget(el, hal) {
+// lægges i opvisningshallen hal (onFiles: indlæs nu, eller læg klar).
+function makeFileDropTarget(el, hal, onFiles = uploadFiles) {
   el.addEventListener("dragover", (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
@@ -169,7 +174,7 @@ function makeFileDropTarget(el, hal) {
     if (!hasFiles(e)) return;
     e.preventDefault();
     el.classList.remove("file-over");
-    uploadFiles(e.dataTransfer.files, hal);
+    onFiles(e.dataTransfer.files, hal);
   });
 }
 
@@ -213,7 +218,12 @@ async function init() {
   render();
 
   const fileInput = document.getElementById("file-input");
-  fileInput.addEventListener("change", () => uploadFiles(fileInput.files, uploadTarget));
+  fileInput.addEventListener("change", () => {
+    const handler = fileHandler || uploadFiles;
+    fileHandler = null;
+    handler(fileInput.files, uploadTarget);
+  });
+  document.getElementById("btn-make-plan").addEventListener("click", onMakePlan);
   document.querySelectorAll("#btn-upload, .js-upload").forEach((btn) => {
     btn.addEventListener("click", () => chooseFiles(defaultUploadHal()));
   });
@@ -290,9 +300,62 @@ async function onShowHallCreate(e) {
 
 // ---------- Indlæs Excel ----------
 
-function chooseFiles(hal) {
+function chooseFiles(hal, handler = null) {
   uploadTarget = hal;
+  fileHandler = handler;
   document.getElementById("file-input").click();
+}
+
+// Kun .xlsx. Andre filer nævnes i en besked og springes over.
+function excelOnly(files) {
+  const all = Array.from(files || []);
+  const xlsx = all.filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
+  const skipped = all.filter((f) => !xlsx.includes(f));
+  if (skipped.length) {
+    alert(`Kun Excel-filer (.xlsx) kan indlæses. Sprunget over: ${skipped.map((f) => f.name).join(", ")}`);
+  }
+  return xlsx;
+}
+
+// Kom i gang: læg filerne klar under hallen (indlæses først ved "Lav opvarmningsplan").
+function stageFiles(files, hal) {
+  // Læs filerne, før filvælgeren tømmes — dens liste er "levende".
+  const xlsx = excelOnly(files);
+  document.getElementById("file-input").value = "";
+  if (!xlsx.length || !hal) return;
+  const list = pendingFiles.get(hal) || [];
+  xlsx.forEach((f) => { if (!list.some((g) => g.name === f.name)) list.push(f); });
+  pendingFiles.set(hal, list);
+  render();
+}
+
+function unstageFile(hal, name) {
+  const list = (pendingFiles.get(hal) || []).filter((f) => f.name !== name);
+  if (list.length) pendingFiles.set(hal, list);
+  else pendingFiles.delete(hal);
+  render();
+}
+
+// Glem klar-lagte filer for haller, der ikke findes længere.
+function prunePending() {
+  [...pendingFiles.keys()].forEach((hal) => {
+    if (!STATE.showHalls.some((h) => h.name === hal)) pendingFiles.delete(hal);
+  });
+}
+
+async function onMakePlan() {
+  // Hallernes rækkefølge, så holdene lander i samme orden som listen.
+  const items = STATE.showHalls.flatMap((h) => (pendingFiles.get(h.name) || []).map((file) => ({ file, hal: h.name })));
+  if (!items.length) return;
+  const btn = document.getElementById("btn-make-plan");
+  btn.disabled = true;
+  const before = STATE;
+  STATE = await handle(Api.uploadToHalls(items));
+  if (STATE !== before) {
+    pendingFiles.clear();
+    selectHal(items[0].hal);
+  }
+  render();
 }
 
 // Knappen "Indlæs Excel": den hal, man står i under Program, ellers den
@@ -304,13 +367,9 @@ function defaultUploadHal() {
 
 // Alle filerne lægges i den samme opvisningshal (hal).
 async function uploadFiles(files, hal) {
-  const all = Array.from(files || []);
+  // Læs filerne, før filvælgeren tømmes — dens liste er "levende".
+  const xlsx = excelOnly(files);
   document.getElementById("file-input").value = "";
-  const xlsx = all.filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
-  const skipped = all.filter((f) => !xlsx.includes(f));
-  if (skipped.length) {
-    alert(`Kun Excel-filer (.xlsx) kan indlæses. Sprunget over: ${skipped.map((f) => f.name).join(", ")}`);
-  }
   if (!xlsx.length) return;
   const before = STATE;
   STATE = await handle(Api.upload(xlsx, hal));
@@ -570,7 +629,12 @@ function showHallItem(hal, index, where) {
     inlineInput(hal.name, "Navn på opvisningshal", "hall-name-input", `${where}-show:${index}`, async (newName) => {
       const wasActive = activeHal === hal.name;
       STATE = await apiJSON("/api/halls/show", "PATCH", { oldName: hal.name, newName });
-      if (wasActive && STATE.showHalls.some((h) => h.name === newName)) selectHal(newName);
+      const renamed = STATE.showHalls.some((h) => h.name === newName);
+      if (wasActive && renamed) selectHal(newName);
+      if (renamed && pendingFiles.has(hal.name)) {
+        pendingFiles.set(newName, pendingFiles.get(hal.name));
+        pendingFiles.delete(hal.name);
+      }
       await settle();
       render();
     }),
@@ -584,19 +648,37 @@ function showHallItem(hal, index, where) {
   );
   li.appendChild(row);
   if (where === "onb") {
-    // Synligt felt at trække filen ind på — i sidepanelet kan man stadig
-    // slippe en fil på rækken, men feltet fylder for meget der.
+    // Kom i gang: filerne lægges klar her og indlæses først ved "Lav
+    // opvarmningsplan", så man kan nå at lægge filer i alle hallerne.
+    const staged = pendingFiles.get(hal.name) || [];
+    staged.forEach((f) => li.appendChild(stagedFileChip(hal.name, f)));
     const drop = document.createElement("button");
     drop.type = "button";
-    drop.className = "hall-drop";
+    drop.className = "hall-drop" + (staged.length ? " has-files" : "");
     const choose = document.createElement("strong");
     choose.textContent = "vælg fil";
-    drop.append(icon("file"), document.createTextNode("Træk Excel-filen hertil eller "), choose);
-    drop.addEventListener("click", () => chooseFiles(hal.name));
+    drop.append(icon("file"),
+      document.createTextNode(staged.length ? "Læg en fil mere hertil eller " : "Træk Excel-filen hertil eller "), choose);
+    drop.addEventListener("click", () => chooseFiles(hal.name, stageFiles));
     li.appendChild(drop);
+    makeFileDropTarget(li, hal.name, stageFiles);
+  } else {
+    // I sidepanelet kan man stadig slippe en fil på rækken (indlæses med det samme).
+    makeFileDropTarget(li, hal.name);
   }
-  makeFileDropTarget(li, hal.name);
   return li;
+}
+
+// En fil, der ligger klar under en hal på Kom i gang, med et ✕ til at fjerne den.
+function stagedFileChip(hal, file) {
+  const chip = document.createElement("div");
+  chip.className = "staged-file";
+  const name = document.createElement("span");
+  name.className = "staged-file-name";
+  name.textContent = file.name;
+  chip.append(icon("file"), name,
+    iconButton("close", `Fjern ${file.name}`, () => unstageFile(hal, file.name), "icon-btn-danger"));
+  return chip;
 }
 
 function renderHalls() {
@@ -638,11 +720,16 @@ function renderOverview() {
 }
 
 function renderOnboarding() {
+  prunePending();
+  const staged = [...pendingFiles.values()].reduce((n, list) => n + list.length, 0);
   const steps = [
     ["step-warmup", STATE.warmupHalls.length > 0],
-    ["step-show", false],
+    ["step-show", staged > 0],
     ["step-check", false],
   ];
+  const make = document.getElementById("btn-make-plan");
+  make.disabled = staged === 0;
+  make.title = staged ? "" : "Læg mindst én Excel-fil klar under en opvisningshal først";
   const current = steps.find(([, done]) => !done);
   steps.forEach(([id, done]) => {
     const el = document.getElementById(id);

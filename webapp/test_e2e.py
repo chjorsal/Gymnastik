@@ -377,10 +377,23 @@ def drop_tests(page, tmp, dialogs):
     rows_in = lambda hal: page.evaluate(f"() => STATE.rows.filter(r => r.opvisningHal === '{hal}')"
                                         ".sort((a, b) => a.order - b.order).map(r => r.hold)")
 
+    check("Lav opvarmningsplan kan ikke trykkes, før der ligger en fil klar", page.is_disabled("#btn-make-plan"))
     drop_files(page, "#onb-show-list li:nth-child(2) .hall-drop",
                [("fredag.xlsx", excel_bytes(["B1", "B2"], "13:00")), ("lørdag.xlsx", excel_bytes(["B3"]))])
+    page.wait_for_timeout(300)
+    check("filer sluppet på en hal lægges klar og indlæses ikke endnu",
+          page.evaluate("() => STATE.rows.length") == 0 and page.is_visible("#onboarding")
+          and page.locator("#onb-show-list li:nth-child(2) .staged-file").all_inner_texts() == ["fredag.xlsx", "lørdag.xlsx"])
+    drop_files(page, "#onb-show-list li:nth-child(1) .hall-drop", [("a.xlsx", excel_bytes(["A0"]))])
+    page.wait_for_timeout(200)
+    check("man kan nå at lægge en fil i den anden hal også",
+          page.locator("#onb-show-list li:nth-child(1) .staged-file").count() == 1 and not page.is_disabled("#btn-make-plan"))
+    page.locator("#onb-show-list li:nth-child(1) .staged-file button").click()
+    check("✕ fjerner en fil, der ligger klar", page.locator("#onb-show-list li:nth-child(1) .staged-file").count() == 0)
+
+    page.click("#btn-make-plan")
     page.wait_for_function("() => STATE.rows.length === 3")
-    check("to filer sluppet på Sal B lander begge i Sal B, i rækkefølge", rows_in("Sal B") == ["B1", "B2", "B3"]
+    check("Lav opvarmningsplan indlæser filerne i deres hal, i rækkefølge", rows_in("Sal B") == ["B1", "B2", "B3"]
           and rows_in("Sal A") == [], rows_in("Sal B"))
     check("en tom hal får starttiden fra filens første Tid",
           page.evaluate("() => STATE.showHalls.find(h => h.name === 'Sal B').startTime") == "13:00")
@@ -415,6 +428,20 @@ def drop_tests(page, tmp, dialogs):
     fc.value.set_files(str(late))
     page.wait_for_function("() => STATE.rows.length === 6")
     check("Indlæs Excel under Program lægger filen i den åbne hal", rows_in("Sal C") == ["C1", "C2"])
+
+    # en ugyldig fil på Kom i gang: intet indlæses
+    api(page, "POST", "/api/reset")
+    refresh(page)
+    page.click(".rail-link[data-view=oversigt]")
+    page.wait_for_selector("#onboarding:not(.hidden)")
+    drop_files(page, "#onb-show-list li:nth-child(1) .hall-drop", [("god.xlsx", excel_bytes(["G1"]))])
+    drop_files(page, "#onb-show-list li:nth-child(2) .hall-drop", [("skrald.xlsx", b"ikke excel")])
+    n = len(dialogs)
+    page.click("#btn-make-plan")
+    page.wait_for_timeout(600)
+    check("én ugyldig fil giver besked, og ingen af filerne indlæses",
+          len(dialogs) > n and "skrald.xlsx" in dialogs[-1] and page.evaluate("() => STATE.rows.length") == 0
+          and page.locator("#onb-show-list .staged-file").count() == 2, dialogs[-1:])
 
     for hal in ("Sal A", "Sal B", "Sal C"):
         api(page, "DELETE", "/api/halls/show", {"name": hal})
