@@ -64,6 +64,28 @@ def run():
                            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
         check("garbage upload -> 400 with error", status == 400 and "x.xlsx" in json.loads(body)["error"])
 
+        def multipart(parts):
+            body = b""
+            for name, filename, data in parts:
+                disp = f'form-data; name="{name}"' + (f'; filename="{filename}"' if filename else "")
+                body += f"--{boundary}\r\nContent-Disposition: {disp}\r\n\r\n".encode() + data + b"\r\n"
+            return body + f"--{boundary}--\r\n".encode()
+
+        req("POST", "/api/halls/show", {"name": "Sal B"})
+        raw = multipart([("files", "a.xlsx", excel_bytes(["A1"])), ("halls", None, "Sal A".encode()),
+                         ("files", "b.xlsx", excel_bytes(["B1"])), ("halls", None, "Sal B".encode())])
+        status, body = req("POST", "/api/upload-halls", raw=raw,
+                           headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        rows = json.loads(body)["rows"] if status == 200 else []
+        check("upload-halls puts each file in its own hall", status == 200
+              and [(r["hold"], r["opvisningHal"]) for r in rows if r["hold"] in ("A1", "B1")]
+              == [("A1", "Sal A"), ("B1", "Sal B")], body[:200])
+        raw = multipart([("files", "a.xlsx", excel_bytes(["A2"])), ("halls", None, "Sal A".encode()),
+                         ("files", "c.xlsx", excel_bytes(["C1"]))])
+        status, body = req("POST", "/api/upload-halls", raw=raw,
+                           headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        check("upload-halls with a file without a hall -> 400", status == 400, body[:200])
+
         status, _ = req("PATCH", "/api/rows/findes-ikke", {"field": "varighed", "value": 1})
         check("patch missing row -> 404", status == 404)
 
@@ -79,7 +101,7 @@ def run():
               and 'filename="L_rdag Arena Hal2.xlsx"' in disp, disp)
 
         saved = json.loads((Path(tmp) / "state.json").read_text(encoding="utf-8"))
-        check("state is saved to STATE_FILE", len(saved["raw_rows"]) == 2)
+        check("state is saved to STATE_FILE", len(saved["raw_rows"]) == 4)
     finally:
         server.terminate()
         server.wait(timeout=10)

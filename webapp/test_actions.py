@@ -131,6 +131,37 @@ def run():
     check("upload button with no halls creates 'Hal 1' with the file's start time",
           empty["show_halls"] == [{"name": "Hal 1", "startTime": "11:00"}], empty["show_halls"])
 
+    # ---------- Lav opvarmningsplan: filer til flere haller på én gang ----------
+    mp = actions.start_plan()
+    actions.create_show_hall(mp, "Hal 2")
+    actions.upload_to_halls(mp, [
+        ("Hal 1", [("arena.xlsx", excel_bytes(["A1", "A2"], start="08:30"))]),
+        ("Hal 2", [("hal2a.xlsx", excel_bytes(["B1"], start="10:00")), ("hal2b.xlsx", excel_bytes(["B2"]))]),
+    ])
+    check("upload_to_halls puts each file in its own hall, in order",
+          [(r["Hold"], r["OpvisningHal"], r["Order"]) for r in mp["raw_rows"]]
+          == [("A1", "Hal 1", 0), ("A2", "Hal 1", 1), ("B1", "Hal 2", 0), ("B2", "Hal 2", 1)], mp["raw_rows"])
+    check("upload_to_halls gives each empty hall its own file's start time",
+          [h["startTime"] for h in mp["show_halls"]] == ["08:30", "10:00"], mp["show_halls"])
+
+    mp = actions.start_plan()
+    actions.create_show_hall(mp, "Hal 2")
+    before = copy.deepcopy(mp)
+    err = raises(lambda: actions.upload_to_halls(mp, [
+        ("Hal 1", [("god.xlsx", excel_bytes(["A1"]))]),
+        ("Hal 2", [("skrald.xlsx", b"ikke excel")]),
+    ]), 400)
+    check("one bad file -> nothing is loaded in any hall",
+          err is not None and "skrald.xlsx" in err.message and mp == before, err and err.message)
+    check("upload_to_halls with no files -> 400",
+          raises(lambda: actions.upload_to_halls(mp, [("Hal 1", [])]), 400) is not None and mp == before)
+    check("upload_to_halls with a blank hall -> 400",
+          raises(lambda: actions.upload_to_halls(mp, [("  ", [("a.xlsx", excel_bytes(["A"]))])]), 400) is not None
+          and mp == before)
+    actions.upload_to_halls(mp, [("Ny hal", [("n.xlsx", excel_bytes(["N"]))])])
+    check("upload_to_halls creates a hall that does not exist yet",
+          [h["name"] for h in mp["show_halls"]] == ["Hal 1", "Hal 2", "Ny hal"])
+
     # ---------- omdøb haller: navne skal være unikke ----------
     rp = plan_with_halls()
     actions.upload(rp, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal A")
@@ -479,12 +510,23 @@ def run():
     res = json.loads(browser.upload_files(json.dumps(res["plan"]), json.dumps([path]), "Sal A"))
     check("bridge upload_files reads files from paths",
           res["ok"] and [r["Hold"] for r in res["plan"]["raw_rows"]] == ["Hold 1"], res.get("error"))
+    second = os.path.join(tmpdir, "hal2.xlsx")
+    with open(second, "wb") as f:
+        f.write(excel_bytes([("Hold 2", 10)]))
+    res_h = json.loads(browser.upload_files_to_halls(json.dumps(actions.start_plan()),
+                                                     json.dumps([[path, "Hal 1"], [second, "Hal 2"]])))
+    check("bridge upload_files_to_halls loads each file into its hall",
+          res_h["ok"] and [(r["Hold"], r["OpvisningHal"]) for r in res_h["plan"]["raw_rows"]]
+          == [("Hold 1", "Hal 1"), ("Hold 2", "Hal 2")], res_h.get("error"))
     bad = os.path.join(tmpdir, "skrald.xlsx")
     with open(bad, "wb") as f:
         f.write(b"nej")
     res2 = json.loads(browser.upload_files(json.dumps(res["plan"]), json.dumps([bad]), ""))
     check("bridge upload_files returns a Danish error for a bad file",
           res2["ok"] is False and "skrald.xlsx" in res2["error"])
+    res3 = json.loads(browser.upload_files_to_halls(json.dumps(res["plan"]), json.dumps([[path, "Sal A"], [bad, "Sal B"]])))
+    check("bridge upload_files_to_halls refuses the whole batch on a bad file",
+          res3["ok"] is False and "skrald.xlsx" in res3["error"])
 
     out = os.path.join(tmpdir, "ud.xlsx")
     exp = json.loads(browser.export_to(json.dumps(res["plan"]), out))

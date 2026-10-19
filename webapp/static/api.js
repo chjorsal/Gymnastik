@@ -48,6 +48,11 @@ const Api = (() => {
       if (hal) fd.append("show_hal", hal);
       return readJson(await fetch("/api/upload", { method: "POST", body: fd }));
     },
+    async uploadToHalls(items) {
+      const fd = new FormData();
+      items.forEach(({ file, hal }) => { fd.append("files", file); fd.append("halls", hal); });
+      return readJson(await fetch("/api/upload-halls", { method: "POST", body: fd }));
+    },
     async exportPlan(name) {
       window.location.href = `/api/export.xlsx?name=${encodeURIComponent(name || "")}`;
     },
@@ -97,6 +102,19 @@ const Api = (() => {
       s.onerror = () => reject(new Error(`kunne ikke hente ${src}`));
       document.head.appendChild(s);
     });
+  }
+
+  // Lægger filerne i Pyodides filsystem, så Python kan læse dem.
+  async function writeFiles(files) {
+    const paths = [];
+    for (const [i, f] of files.entries()) {
+      const dir = `/tmp/upload_${Date.now()}_${i}`;
+      py.FS.mkdirTree(dir);
+      const path = `${dir}/${f.name}`;
+      py.FS.writeFile(path, new Uint8Array(await f.arrayBuffer()));
+      paths.push(path);
+    }
+    return paths;
   }
 
   function readStored() {
@@ -181,15 +199,13 @@ const Api = (() => {
       return answer(bridge.call(planJson, name, JSON.stringify(args)), name !== "payload");
     },
     async upload(files, hal) {
-      const paths = [];
-      for (const [i, f] of files.entries()) {
-        const dir = `/tmp/upload_${Date.now()}_${i}`;
-        py.FS.mkdirTree(dir);
-        const path = `${dir}/${f.name}`;
-        py.FS.writeFile(path, new Uint8Array(await f.arrayBuffer()));
-        paths.push(path);
-      }
+      const paths = await writeFiles(files);
       return answer(bridge.upload_files(planJson, JSON.stringify(paths), hal || ""));
+    },
+    async uploadToHalls(items) {
+      const paths = await writeFiles(items.map((i) => i.file));
+      const pairs = paths.map((path, i) => [path, items[i].hal]);
+      return answer(bridge.upload_files_to_halls(planJson, JSON.stringify(pairs)));
     },
     async exportPlan(name) {
       const out = "/tmp/opvisning_med_opvarmning.xlsx";
@@ -223,6 +239,7 @@ const Api = (() => {
     start: (onStatus) => transport.start(onStatus),
     request: (method, url, body) => transport.request(method, url, body),
     upload: (files, hal) => transport.upload(files, hal),
+    uploadToHalls: (items) => transport.uploadToHalls(items),
     exportPlan: (name) => transport.exportPlan(name),
     onExternalChange: (cb) => transport.onExternalChange(cb),
     savePlanFile: () => transport.savePlanFile(),
