@@ -1,11 +1,9 @@
 """Regler for hold: type, opvarmningstid, gangtid og prioritet."""
 
 import re
-from typing import Optional
-
-import pandas as pd
 
 from .config import GANG_MIN, GYLDIGE_HOLDTYPER, OPVARMNING_TIDER, TYPE_KEYWORDS
+from .values import clean_str
 
 
 def classify_type(hold_text: str) -> str:
@@ -19,11 +17,7 @@ def classify_type(hold_text: str) -> str:
 
 
 def read_holdtype(value) -> str:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return "ukendt"
-    val = str(value).strip().lower()
-    if val == "":
-        return "ukendt"
+    val = clean_str(value).lower()
     if val == "dans":
         val = "rytme"
     if val == "akademiet":

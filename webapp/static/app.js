@@ -2,16 +2,28 @@
 
 const ACTIVE_HAL_KEY = "opvarmning_active_hal_v2";
 const ACTIVE_WARMUP_HAL_KEY = "opvarmning_active_warmup_hal_v1";
+const EXPORT_NAME_KEY = "opvarmning_export_name_v1";
+
+// Små valg der huskes i browseren. localStorage kan være spærret (fx i et
+// privat vindue) — så huskes de bare ikke.
+function readSetting(key) {
+  try { return localStorage.getItem(key) || null; } catch (e) { return null; }
+}
+function saveSetting(key, value) {
+  try { localStorage.setItem(key, value || ""); } catch (e) { /* ikke vigtigt */ }
+}
 
 let STATE = { warmupHalls: [], priorityHall: null, showHalls: [], rows: [], schedule: [] };
-let activeHal = localStorage.getItem(ACTIVE_HAL_KEY) || null;
+let activeHal = readSetting(ACTIVE_HAL_KEY);
 // Siden åbner altid på oversigten.
 let currentView = "oversigt";
 // Valgte rækker under Program (flyt/slet flere på én gang). Gælder kun den
 // aktive opvisningshal og nulstilles, når man skifter hal.
 const selectedIds = new Set();
 let lastSelectIndex = null;
-let activeWarmupHal = localStorage.getItem(ACTIVE_WARMUP_HAL_KEY) || null;
+let activeWarmupHal = readSetting(ACTIVE_WARMUP_HAL_KEY);
+// Hallen, som filerne fra filvælgeren skal i (sættes, lige før den åbnes).
+let uploadTarget = null;
 
 // ---------- Ikoner ----------
 // Små håndrullede SVG-ikoner (stroke-baseret, arver farve via currentColor) —
@@ -23,6 +35,7 @@ const ICONS = {
   starFilled: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   starOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>',
 };
 
 function icon(name, extraClass) {
@@ -70,17 +83,38 @@ async function apiGet(url) {
 async function apiJSON(url, method, body) {
   return handle(Api.request(method, url, body));
 }
+// Lad browseren gøre fx et Tab færdigt (fokus flyttet til næste felt), før
+// siden tegnes forfra — så render() kan sætte fokus det rigtige sted igen.
+// Browserudgaven svarer så hurtigt, at det ellers sker før fokus er flyttet.
+function settle() {
+  return new Promise((resolve) => setTimeout(resolve));
+}
+
+// Kør et kald, gem den nye state og tegn siden forfra.
+async function update(request) {
+  STATE = await request;
+  await settle();
+  render();
+}
 
 // ---------- Genbrugte UI-hjælpere ----------
-// (drag-og-slip og redigerbare/readonly celler bruges ens flere steder:
-// hovedlisten, opvarmnings-tabellen og "ikke placeret"-listen)
 
 function confirmAndRun(message, action) {
   return async () => {
     if (!confirm(message)) return;
-    STATE = await action();
-    render();
+    await update(action());
   };
+}
+
+function iconButton(iconName, label, onClick, extraClass) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "icon-btn" + (extraClass ? ` ${extraClass}` : "");
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  btn.appendChild(icon(iconName));
+  btn.addEventListener("click", onClick);
+  return btn;
 }
 
 // Gør et element til en trækbar kilde: sætter dataTransfer til id'et og
@@ -94,20 +128,47 @@ function makeDragSource(el, id) {
   el.addEventListener("dragend", () => el.classList.remove("dragging"));
 }
 
-// Gør et element til et droppable mål: toggler .drag-over og kalder
-// onDrop(draggedId) når noget slippes ovenpå.
+// Trækker man filer fra computeren (og ikke et hold på siden)?
+function hasFiles(e) {
+  return Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files");
+}
+
+// Gør et element til et mål for hold, der trækkes rundt på siden: toggler
+// .drag-over og kalder onDrop(draggedId, event). Filer ignoreres her.
 function makeDropTarget(el, onDrop) {
   el.addEventListener("dragover", (e) => {
+    if (hasFiles(e)) return;
     e.preventDefault();
     el.classList.add("drag-over");
   });
   el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
   el.addEventListener("drop", async (e) => {
+    if (hasFiles(e)) return;
     e.preventDefault();
     el.classList.remove("drag-over");
     const draggedId = e.dataTransfer.getData("text/plain");
     if (!draggedId) return;
-    await onDrop(draggedId);
+    await onDrop(draggedId, e);
+  });
+}
+
+// Gør et element til et sted, man kan slippe Excel-filer: alle filerne
+// lægges i opvisningshallen hal.
+function makeFileDropTarget(el, hal) {
+  el.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    el.classList.add("file-over");
+  });
+  el.addEventListener("dragleave", (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove("file-over");
+  });
+  el.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    el.classList.remove("file-over");
+    uploadFiles(e.dataTransfer.files, hal);
   });
 }
 
@@ -115,6 +176,13 @@ function readonlyCell(text, extraClass) {
   const td = document.createElement("td");
   td.className = extraClass ? `${extraClass} readonly` : "readonly";
   td.textContent = text;
+  return td;
+}
+
+function cell(child, className) {
+  const td = document.createElement("td");
+  if (className) td.className = className;
+  td.appendChild(child);
   return td;
 }
 
@@ -132,11 +200,8 @@ async function init() {
     return;
   }
   boot.classList.add("hidden");
-  Api.onExternalChange(async () => {
-    STATE = await apiGet("/api/state");
-    render();
-  });
-  document.getElementById("btn-export").addEventListener("click", () => handle(Api.exportPlan()));
+  Api.onExternalChange(() => update(apiGet("/api/state")));
+  setupExportDialog();
   // En adresse som .../#program åbner direkte på den visning.
   const fromHash = location.hash.slice(1);
   if (VIEWS.includes(fromHash)) currentView = fromHash;
@@ -147,13 +212,18 @@ async function init() {
   render();
 
   const fileInput = document.getElementById("file-input");
-  fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
+  fileInput.addEventListener("change", () => uploadFiles(fileInput.files, uploadTarget));
   document.querySelectorAll("#btn-upload, .js-upload").forEach((btn) => {
-    btn.addEventListener("click", () => fileInput.click());
+    btn.addEventListener("click", () => chooseFiles(defaultUploadHal()));
   });
+  // En fil sluppet uden for en hal må ikke få browseren til at åbne den.
+  ["dragover", "drop"].forEach((type) => window.addEventListener(type, (e) => {
+    if (!hasFiles(e) || e.defaultPrevented) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "none";
+  }));
   document.getElementById("onb-warmup-form").addEventListener("submit", (e) => onHallCreate(e, "warmup"));
   document.getElementById("onb-show-form").addEventListener("submit", onShowHallCreate);
-  setupDropzone(document.getElementById("dropzone"));
   document.querySelectorAll(".rail-link[data-view]").forEach((btn) => {
     btn.addEventListener("click", () => setView(btn.dataset.view));
   });
@@ -163,15 +233,13 @@ async function init() {
   document.getElementById("btn-solve").addEventListener("click", onSolve);
   document.getElementById("bulk-delete").addEventListener("click", onBulkDelete);
   document.getElementById("bulk-clear").addEventListener("click", () => {
-    selectedIds.clear();
-    lastSelectIndex = null;
+    clearSelection();
     renderTable();
   });
   document.getElementById("select-all").addEventListener("change", (e) => {
     const rows = STATE.rows.filter((r) => r.opvisningHal === activeHal);
-    selectedIds.clear();
+    clearSelection();
     if (e.target.checked) rows.forEach((r) => selectedIds.add(r.id));
-    lastSelectIndex = null;
     renderTable();
   });
   let resizeTimer;
@@ -213,42 +281,40 @@ async function onShowHallCreate(e) {
   }
   nameInput.value = "";
   timeInput.value = "";
-  if (!activeHal) { activeHal = name; saveActiveHal(); }
+  if (!activeHal) selectHal(name);
   render();
   nameInput.focus();
 }
 
-// Alle hold lægges i den første opvisningshal; brugeren fordeler dem selv
-// bagefter under Program. Findes der ingen opvisningshal endnu, opretter
-// serveren en ud fra filnavnet.
-async function uploadFiles(files) {
-  const hal = STATE.showHalls.length ? STATE.showHalls[0].name : null;
-  const input = document.getElementById("file-input");
-  const xlsx = Array.from(files || []).filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
-  if (!xlsx.length) {
-    if (files && files.length) alert("Kun Excel-filer (.xlsx) kan indlæses.");
-    return;
-  }
-  STATE = await handle(Api.upload(xlsx, hal));
-  input.value = "";
-  if (!activeHal && STATE.showHalls.length) {
-    activeHal = STATE.showHalls[STATE.showHalls.length - 1].name;
-    saveActiveHal();
-  }
-  render();
+// ---------- Indlæs Excel ----------
+
+function chooseFiles(hal) {
+  uploadTarget = hal;
+  document.getElementById("file-input").click();
 }
 
-function setupDropzone(zone) {
-  zone.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    zone.classList.add("drag-over");
-  });
-  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
-  zone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    zone.classList.remove("drag-over");
-    uploadFiles(e.dataTransfer.files);
-  });
+// Knappen "Indlæs Excel": den hal, man står i under Program, ellers den
+// første. null = ingen haller endnu; så opretter serveren "Hal 1".
+function defaultUploadHal() {
+  if (currentView === "program" && STATE.showHalls.some((h) => h.name === activeHal)) return activeHal;
+  return STATE.showHalls.length ? STATE.showHalls[0].name : null;
+}
+
+// Alle filerne lægges i den samme opvisningshal (hal).
+async function uploadFiles(files, hal) {
+  const all = Array.from(files || []);
+  document.getElementById("file-input").value = "";
+  const xlsx = all.filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
+  const skipped = all.filter((f) => !xlsx.includes(f));
+  if (skipped.length) {
+    alert(`Kun Excel-filer (.xlsx) kan indlæses. Sprunget over: ${skipped.map((f) => f.name).join(", ")}`);
+  }
+  if (!xlsx.length) return;
+  const before = STATE;
+  STATE = await handle(Api.upload(xlsx, hal));
+  const landed = hal || (STATE.showHalls[0] && STATE.showHalls[0].name);
+  if (STATE !== before && landed) selectHal(landed);
+  render();
 }
 
 async function onOpenPlan(input) {
@@ -257,15 +323,13 @@ async function onOpenPlan(input) {
   if (!file) return;
   if (STATE.rows.length && !confirm("Erstat den nuværende plan med planen fra filen?")) return;
   STATE = await handle(Api.openPlanFile(await file.text()));
-  activeHal = STATE.showHalls.length ? STATE.showHalls[0].name : null;
-  saveActiveHal();
+  selectHal(STATE.showHalls.length ? STATE.showHalls[0].name : null);
   render();
 }
 
 async function onReset() {
   if (!confirm("Ryd alle indlæste hold? Hal-opsætningen bevares.")) return;
-  STATE = await apiJSON("/api/reset", "POST", {});
-  render();
+  await update(apiJSON("/api/reset", "POST", {}));
 }
 
 async function onHallCreate(e, kind) {
@@ -275,17 +339,13 @@ async function onHallCreate(e, kind) {
   if (!name) return;
   STATE = await apiJSON(`/api/halls/${kind}`, "POST", { name });
   input.value = "";
-  if (kind === "show" && !activeHal) {
-    activeHal = name;
-    saveActiveHal();
-  }
+  if (kind === "show" && !activeHal) selectHal(name);
   render();
 }
 
 async function onStartTimeChange(e) {
   if (!activeHal) return;
-  STATE = await apiJSON("/api/halls/show/starttime", "POST", { name: activeHal, startTime: e.target.value.trim() });
-  render();
+  await update(apiJSON("/api/halls/show/starttime", "POST", { name: activeHal, startTime: e.target.value.trim() }));
 }
 
 // Hold tilmeldt på bagkant: 15 min opvisning og 15 min opvarmning, nederst
@@ -294,25 +354,69 @@ async function onAddTeam() {
   if (!activeHal) return;
   const name = (prompt(`Navn på holdet, der skal tilføjes i ${activeHal}:`) || "").trim();
   if (!name) return;
-  STATE = await apiJSON("/api/rows/team", "POST", { hal: activeHal, name });
-  render();
+  await update(apiJSON("/api/rows/team", "POST", { hal: activeHal, name }));
 }
 
 async function onAddSpecial(type) {
   if (!activeHal) return;
-  STATE = await apiJSON("/api/rows/special", "POST", { hal: activeHal, type });
-  render();
+  await update(apiJSON("/api/rows/special", "POST", { hal: activeHal, type }));
 }
 
+// ---------- Hent Excel-plan ----------
+
+// Forslag til filnavn, fx "Opvarmningsplan Arena og Hal2 19-10-2026".
+function suggestedExportName() {
+  const d = new Date();
+  const date = [d.getDate(), d.getMonth() + 1].map((n) => String(n).padStart(2, "0")).concat(d.getFullYear()).join("-");
+  const halls = STATE.showHalls.map((h) => h.name);
+  return ["Opvarmningsplan", halls.length <= 2 ? halls.join(" og ") : "", date].filter(Boolean).join(" ");
+}
+
+function setupExportDialog() {
+  const dialog = document.getElementById("export-dialog");
+  const input = document.getElementById("export-name");
+  const modal = bootstrap.Modal.getOrCreateInstance(dialog);
+  document.getElementById("btn-export").addEventListener("click", () => {
+    input.value = readSetting(EXPORT_NAME_KEY) || suggestedExportName();
+    modal.show();
+  });
+  dialog.addEventListener("shown.bs.modal", () => { input.focus(); input.select(); });
+  document.getElementById("export-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = input.value.trim().replace(/\.xlsx$/i, "").trim() || suggestedExportName();
+    saveSetting(EXPORT_NAME_KEY, name);
+    modal.hide();
+    handle(Api.exportPlan(name));
+  });
+}
+
+// ---------- Visning og valgt hal ----------
+
 function saveActiveHal() {
-  try { localStorage.setItem(ACTIVE_HAL_KEY, activeHal || ""); } catch (e) {}
+  saveSetting(ACTIVE_HAL_KEY, activeHal);
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  lastSelectIndex = null;
+}
+
+// Skift opvisningshal under Program (uden at tegne forfra).
+function selectHal(name) {
+  if (name !== activeHal) clearSelection();
+  activeHal = name;
+  saveActiveHal();
 }
 
 function setActiveHal(name) {
-  if (name !== activeHal) { selectedIds.clear(); lastSelectIndex = null; }
-  activeHal = name;
-  saveActiveHal();
+  selectHal(name);
   render();
+}
+
+// Åbn Program på en bestemt opvisningshal.
+function openProgram(name) {
+  selectHal(name);
+  setView("program");
 }
 
 function setView(view) {
@@ -323,17 +427,12 @@ function setView(view) {
 
 function setActiveWarmupHal(name) {
   activeWarmupHal = name;
-  try { localStorage.setItem(ACTIVE_WARMUP_HAL_KEY, name || ""); } catch (e) {}
+  saveSetting(ACTIVE_WARMUP_HAL_KEY, name);
   render();
 }
 
-// Hop til det opvisningshold der hører til et opvarmningspunkt, så man kan
-// rette det med det samme (varighed/opvarmningstid) i hovedlisten.
-function jumpToRow(opvisningHal) {
-  if (!opvisningHal) return;
-  activeHal = opvisningHal;
-  saveActiveHal();
-  setView("program");
+function ensureActiveWarmupHal() {
+  if (!STATE.warmupHalls.includes(activeWarmupHal)) activeWarmupHal = STATE.warmupHalls[0] || null;
 }
 
 // ---------- Render ----------
@@ -416,6 +515,93 @@ function renderPageHead() {
   }
 }
 
+// ---------- Haller: fælles rækker til "Kom i gang" og sidepanelet ----------
+
+// Tekstfelt der gemmer, når man forlader det. Et tomt felt fortryder.
+function inlineInput(value, label, className, focusKey, onSave) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = `form-control form-control-sm ${className}`;
+  input.value = value;
+  input.setAttribute("aria-label", label);
+  input.dataset.focusKey = focusKey;
+  input.addEventListener("change", async () => {
+    const next = input.value.trim();
+    if (!next || next === value) { input.value = value; return; }
+    await onSave(next);
+  });
+  return input;
+}
+
+// where: "onb" (Kom i gang) eller "panel" (sidepanelet Haller) — så fokus
+// kan findes igen i den rigtige liste, når siden tegnes forfra.
+function warmupHallItem(name, index, where) {
+  const isPrio = name === STATE.priorityHall;
+  const li = document.createElement("li");
+  li.className = "hall-item";
+  const star = iconButton(isPrio ? "starFilled" : "starOutline",
+    isPrio ? "Prioritetshal: efterskoler varmer op her først" : `Gør ${name} til prioritetshal`,
+    () => update(apiJSON("/api/halls/warmup/priority", "POST", { name })), "star" + (isPrio ? " active" : ""));
+  star.setAttribute("aria-pressed", String(isPrio));
+  li.append(star, inlineInput(name, "Navn på opvarmningshal", "hall-name-input", `${where}-warmup:${index}`,
+    (newName) => update(apiJSON("/api/halls/warmup", "PATCH", { oldName: name, newName }))));
+  if (isPrio) {
+    const prio = document.createElement("span");
+    prio.className = "prio";
+    prio.textContent = "Prioritetshal";
+    li.appendChild(prio);
+  }
+  li.appendChild(iconButton("close", `Slet ${name}`, confirmAndRun(
+    `Slet opvarmningshal "${name}"?`, () => apiJSON("/api/halls/warmup", "DELETE", { name })), "icon-btn-danger"));
+  return li;
+}
+
+function showHallItem(hal, index, where) {
+  const li = document.createElement("li");
+  li.className = "hall-item";
+  const row = document.createElement("div");
+  row.className = "hall-item-row";
+  const time = inlineInput(hal.startTime || "", `Starttid for ${hal.name}`, "hall-time-input", `${where}-show-time:${index}`,
+    (startTime) => update(apiJSON("/api/halls/show/starttime", "POST", { name: hal.name, startTime })));
+  time.placeholder = "09:00";
+  row.append(
+    inlineInput(hal.name, "Navn på opvisningshal", "hall-name-input", `${where}-show:${index}`, async (newName) => {
+      const wasActive = activeHal === hal.name;
+      STATE = await apiJSON("/api/halls/show", "PATCH", { oldName: hal.name, newName });
+      if (wasActive && STATE.showHalls.some((h) => h.name === newName)) selectHal(newName);
+      await settle();
+      render();
+    }),
+    time,
+    iconButton("close", `Slet ${hal.name}`, async () => {
+      if (!confirm(`Slet opvisningshal "${hal.name}" og alle hold i den?`)) return;
+      STATE = await apiJSON("/api/halls/show", "DELETE", { name: hal.name });
+      if (activeHal === hal.name) selectHal(STATE.showHalls.length ? STATE.showHalls[0].name : null);
+      render();
+    }, "icon-btn-danger"),
+  );
+  li.appendChild(row);
+  if (where === "onb") {
+    // Synligt felt at trække filen ind på — i sidepanelet kan man stadig
+    // slippe en fil på rækken, men feltet fylder for meget der.
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "hall-drop";
+    drop.append(icon("file"), document.createTextNode("Træk Excel-filen hertil, eller klik for at vælge den"));
+    drop.addEventListener("click", () => chooseFiles(hal.name));
+    li.appendChild(drop);
+  }
+  makeFileDropTarget(li, hal.name);
+  return li;
+}
+
+function renderHalls() {
+  document.getElementById("warmup-hall-list")
+    .replaceChildren(...STATE.warmupHalls.map((name, i) => warmupHallItem(name, i, "panel")));
+  document.getElementById("show-hall-list")
+    .replaceChildren(...STATE.showHalls.map((hal, i) => showHallItem(hal, i, "panel")));
+}
+
 // ---------- Oversigt ----------
 
 function fmtMinutes(min) {
@@ -447,40 +633,10 @@ function renderOverview() {
   renderShowHallSummary();
 }
 
-function onbItem(nameText, metaText, actions) {
-  const li = document.createElement("li");
-  li.className = "onb-item";
-  const name = document.createElement("span");
-  name.className = "onb-item-name";
-  name.textContent = nameText;
-  li.appendChild(name);
-  if (metaText) {
-    const meta = document.createElement("span");
-    meta.className = "onb-item-meta";
-    meta.textContent = metaText;
-    li.appendChild(meta);
-  }
-  actions.forEach((a) => li.appendChild(a));
-  return li;
-}
-
-function removeButton(label, action) {
-  const del = document.createElement("button");
-  del.type = "button";
-  del.className = "icon-btn icon-btn-danger";
-  del.title = label;
-  del.setAttribute("aria-label", label);
-  del.appendChild(icon("close"));
-  del.addEventListener("click", async () => { STATE = await action(); render(); });
-  return del;
-}
-
 function renderOnboarding() {
-  const hasWarmup = STATE.warmupHalls.length > 0;
-  const hasShow = STATE.showHalls.length > 0;
   const steps = [
-    ["step-warmup", hasWarmup],
-    ["step-show", hasShow],
+    ["step-warmup", STATE.warmupHalls.length > 0],
+    ["step-show", STATE.showHalls.length > 0],
     ["step-upload", false],
   ];
   const current = steps.find(([, done]) => !done);
@@ -489,38 +645,10 @@ function renderOnboarding() {
     el.classList.toggle("done", done);
     el.classList.toggle("current", current && current[0] === id);
   });
-
-  const warmupList = document.getElementById("onb-warmup-list");
-  warmupList.replaceChildren(...STATE.warmupHalls.map((name) => {
-    const isPrio = name === STATE.priorityHall;
-    const star = document.createElement("button");
-    star.type = "button";
-    star.className = "star icon-btn" + (isPrio ? " active" : "");
-    star.title = isPrio ? "Prioritetshal: efterskoler varmer op her først" : "Gør til prioritetshal";
-    star.setAttribute("aria-pressed", String(isPrio));
-    star.setAttribute("aria-label", `Prioritetshal: ${name}`);
-    star.appendChild(icon(isPrio ? "starFilled" : "starOutline"));
-    star.addEventListener("click", async () => {
-      STATE = await apiJSON("/api/halls/warmup/priority", "POST", { name });
-      render();
-    });
-    const extra = [star];
-    if (isPrio) {
-      const prio = document.createElement("span");
-      prio.className = "prio";
-      prio.textContent = "Prioritetshal";
-      extra.push(prio);
-    }
-    extra.push(removeButton(`Fjern ${name}`, () => apiJSON("/api/halls/warmup", "DELETE", { name })));
-    return onbItem(name, null, extra);
-  }));
-
-  const showList = document.getElementById("onb-show-list");
-  showList.replaceChildren(...STATE.showHalls.map((hal) => {
-    return onbItem(hal.name, `start ${hal.startTime}`, [
-      removeButton(`Fjern ${hal.name}`, () => apiJSON("/api/halls/show", "DELETE", { name: hal.name })),
-    ]);
-  }));
+  document.getElementById("onb-warmup-list")
+    .replaceChildren(...STATE.warmupHalls.map((name, i) => warmupHallItem(name, i, "onb")));
+  document.getElementById("onb-show-list")
+    .replaceChildren(...STATE.showHalls.map((hal, i) => showHallItem(hal, i, "onb")));
 }
 
 const DAY_END = 24 * 60;
@@ -533,23 +661,32 @@ function hallEndMinutes(halName) {
   return Math.max(...rows.map((r) => r.opvisningMin + r.varighed));
 }
 
+// Rød linje øverst på oversigten med en tekst og en handling.
+function setBanner(id, text, actionText, onClick) {
+  const banner = document.getElementById(id);
+  banner.classList.toggle("hidden", !text);
+  if (!text) return;
+  const action = document.createElement("span");
+  action.className = "banner-action";
+  action.textContent = actionText;
+  banner.replaceChildren(icon("warning"), document.createTextNode(text), action);
+  banner.onclick = onClick;
+}
+
+function renderProblemBanner() {
+  const count = unplacedRows().length;
+  setBanner("problem-banner", count ? `${plural(count, "hold mangler", "hold mangler")} plads til opvarmning.` : "",
+    "Løs det", () => setView("opvarmning"));
+}
+
 function renderOvernightBanner() {
-  const banner = document.getElementById("overnight-banner");
   const late = STATE.showHalls
     .map((h) => ({ name: h.name, end: hallEndMinutes(h.name) }))
     .filter((h) => h.end !== null && h.end > DAY_END);
-  banner.classList.toggle("hidden", late.length === 0);
-  if (!late.length) return;
   const text = late.map((h) => `${h.name} slutter først kl. ${fmtMinutes(h.end)} om natten`).join(", og ");
-  banner.replaceChildren(
-    icon("warning"),
-    document.createTextNode(`Programmet i ${text}. Fordel holdene på flere opvisningshaller under Program.`),
-  );
-  const action = document.createElement("span");
-  action.className = "banner-action";
-  action.textContent = "Åbn program";
-  banner.appendChild(action);
-  banner.onclick = () => { activeHal = late[0].name; saveActiveHal(); setView("program"); };
+  setBanner("overnight-banner",
+    late.length ? `Programmet i ${text}. Fordel holdene på flere opvisningshaller under Program.` : "",
+    "Åbn program", () => openProgram(late[0].name));
 }
 
 // Forslag beregnes kun her og kun når der er hold uden plads, fordi hvert
@@ -661,11 +798,10 @@ function renderSolveResult() {
   use.type = "button";
   use.className = "btn btn-sm btn-primary";
   use.textContent = "Brug løsningen";
-  use.addEventListener("click", async () => {
+  use.addEventListener("click", () => {
     const payloadChanges = changes.map((c) => ({ id: c.id, minutes: c.to }));
     solveResult = null;
-    STATE = await apiJSON("/api/warmup-minutes", "POST", { changes: payloadChanges });
-    render();
+    return update(apiJSON("/api/warmup-minutes", "POST", { changes: payloadChanges }));
   });
   const cancel = document.createElement("button");
   cancel.type = "button";
@@ -681,22 +817,6 @@ function suggestionLine(text, none) {
   li.className = "suggestion" + (none ? " suggestion-none" : "");
   li.textContent = text;
   return li;
-}
-
-function renderProblemBanner() {
-  const banner = document.getElementById("problem-banner");
-  const count = unplacedRows().length;
-  banner.classList.toggle("hidden", count === 0);
-  if (!count) return;
-  banner.replaceChildren(
-    icon("warning"),
-    document.createTextNode(`${plural(count, "hold mangler", "hold mangler")} plads til opvarmning.`),
-  );
-  const action = document.createElement("span");
-  action.className = "banner-action";
-  action.textContent = "Løs det";
-  banner.appendChild(action);
-  banner.onclick = () => setView("opvarmning");
 }
 
 const TL_LABEL_W = 110;   // bredde på hal-navnene til venstre (px)
@@ -802,16 +922,9 @@ function renderTimeline(teams) {
     const track = lane(hal, open);
     // Slip et hold uden plads her: opvarmningen starter hvor det slippes
     // (rundet til 5 min). Serveren afviser, hvis der ikke er plads.
-    track.addEventListener("dragover", (e) => { e.preventDefault(); track.classList.add("drag-over"); });
-    track.addEventListener("dragleave", () => track.classList.remove("drag-over"));
-    track.addEventListener("drop", async (e) => {
-      e.preventDefault();
-      track.classList.remove("drag-over");
-      const id = e.dataTransfer.getData("text/plain");
-      if (!id) return;
+    makeDropTarget(track, (id, e) => {
       const start = fmtMinutes(minuteAt(e.clientX - track.getBoundingClientRect().left));
-      STATE = await apiJSON(`/api/rows/${encodeURIComponent(id)}/place`, "POST", { hal, start });
-      render();
+      return update(apiJSON(`/api/rows/${encodeURIComponent(id)}/place`, "POST", { hal, start }));
     });
     placed.filter((r) => r.opvarmningHalBeregnet === hal).forEach((r) => {
       addBlock(track, {
@@ -855,18 +968,16 @@ function renderShowHallSummary() {
   const list = document.getElementById("show-hall-summary");
   list.replaceChildren();
   STATE.showHalls.forEach((hal) => {
-    const rows = STATE.rows.filter((r) => r.opvisningHal === hal.name).sort((a, b) => a.order - b.order);
-    const teams = rows.filter((r) => r.needsWarmup);
+    const teams = STATE.rows.filter((r) => r.opvisningHal === hal.name && r.needsWarmup);
     const problems = teams.filter((r) => r.problemMessage).length;
-    const last = rows[rows.length - 1];
     const endMin = hallEndMinutes(hal.name);
-    const end = endMin === null ? null : fmtMinutes(endMin);
 
     const li = document.createElement("li");
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "hall-row";
-    btn.addEventListener("click", () => { activeHal = hal.name; saveActiveHal(); setView("program"); });
+    btn.addEventListener("click", () => openProgram(hal.name));
+    makeFileDropTarget(btn, hal.name);
 
     const dot = document.createElement("span");
     dot.className = "hall-row-dot";
@@ -875,14 +986,12 @@ function renderShowHallSummary() {
     name.className = "hall-row-name";
     name.textContent = hal.name;
     const time = document.createElement("span");
-    time.className = "hall-row-time";
-    if (endMin !== null && endMin > DAY_END) time.className = "hall-row-problem";
-    time.textContent = end ? `${hal.startTime}–${end}` : hal.startTime;
+    time.className = endMin !== null && endMin > DAY_END ? "hall-row-problem" : "hall-row-time";
+    time.textContent = endMin === null ? hal.startTime : `${hal.startTime}–${fmtMinutes(endMin)}`;
     const count = document.createElement("span");
     count.className = problems ? "hall-row-problem" : "hall-row-count";
-    count.textContent = problems
-      ? `${problems} af ${plural(teams.length, "hold", "hold")} mangler opvarmning`
-      : plural(teams.length, "hold", "hold");
+    if (problems) count.textContent = `${problems} af ${plural(teams.length, "hold", "hold")} mangler opvarmning`;
+    else count.textContent = teams.length ? plural(teams.length, "hold", "hold") : "Træk Excel-filen hertil";
     const open = document.createElement("span");
     open.className = "hall-row-open";
     open.textContent = "Åbn program";
@@ -893,129 +1002,53 @@ function renderShowHallSummary() {
   });
 }
 
-function renderHalls() {
-  const warmupList = document.getElementById("warmup-hall-list");
-  warmupList.innerHTML = "";
-  STATE.warmupHalls.forEach((name) => {
-    const li = document.createElement("li");
-    li.className = "list-group-item d-flex align-items-center gap-2 px-2 py-2";
+// ---------- Faner ----------
 
-    const star = document.createElement("span");
-    star.className = "star icon-btn" + (STATE.priorityHall === name ? " active" : "");
-    star.title = "Sæt som prioritetshal";
-    star.appendChild(icon(STATE.priorityHall === name ? "starFilled" : "starOutline"));
-    star.addEventListener("click", async () => {
-      STATE = await apiJSON("/api/halls/warmup/priority", "POST", { name });
-      render();
-    });
+function tabButton(name, active, problemTitle, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tab" + (active ? " active" : "") + (problemTitle ? " has-problem" : "");
+  if (problemTitle) {
+    btn.appendChild(icon("warning"));
+    btn.title = problemTitle;
+  }
+  btn.appendChild(document.createTextNode(name));
+  btn.addEventListener("click", onClick);
+  return btn;
+}
 
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "form-control form-control-sm border-0 bg-transparent px-1";
-    input.value = name;
-    input.addEventListener("change", async () => {
-      const newName = input.value.trim();
-      if (!newName || newName === name) { input.value = name; return; }
-      STATE = await apiJSON("/api/halls/warmup", "PATCH", { oldName: name, newName });
-      render();
-    });
-
-    const del = document.createElement("span");
-    del.className = "del icon-btn icon-btn-danger";
-    del.appendChild(icon("close"));
-    del.title = "Slet hal";
-    del.addEventListener("click", confirmAndRun(
-      `Slet opvarmningshal "${name}"?`,
-      () => apiJSON("/api/halls/warmup", "DELETE", { name })
-    ));
-
-    li.append(star, input, del);
-    warmupList.appendChild(li);
-  });
-
-  const showList = document.getElementById("show-hall-list");
-  showList.innerHTML = "";
-  STATE.showHalls.forEach((hal) => {
-    const li = document.createElement("li");
-    li.className = "list-group-item d-flex align-items-center gap-2 px-2 py-2";
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "form-control form-control-sm border-0 bg-transparent px-1";
-    input.value = hal.name;
-    input.addEventListener("change", async () => {
-      const newName = input.value.trim();
-      if (!newName || newName === hal.name) { input.value = hal.name; return; }
-      const wasActive = activeHal === hal.name;
-      STATE = await apiJSON("/api/halls/show", "PATCH", { oldName: hal.name, newName });
-      if (wasActive) { activeHal = newName; saveActiveHal(); }
-      render();
-    });
-
-    const timeInput = document.createElement("input");
-    timeInput.type = "text";
-    timeInput.className = "form-control form-control-sm hall-time-input";
-    timeInput.placeholder = "HH:MM";
-    timeInput.value = hal.startTime || "";
-    timeInput.title = "Startklokkeslæt";
-    timeInput.addEventListener("change", async () => {
-      STATE = await apiJSON("/api/halls/show/starttime", "POST", { name: hal.name, startTime: timeInput.value.trim() });
-      render();
-    });
-
-    const del = document.createElement("span");
-    del.className = "del icon-btn icon-btn-danger";
-    del.appendChild(icon("close"));
-    del.title = "Slet hal (og alle hold i den)";
-    del.addEventListener("click", async () => {
-      if (!confirm(`Slet opvisningshal "${hal.name}" og alle hold i den?`)) return;
-      STATE = await apiJSON("/api/halls/show", "DELETE", { name: hal.name });
-      if (activeHal === hal.name) {
-        activeHal = STATE.showHalls.length ? STATE.showHalls[0].name : null;
-        saveActiveHal();
-      }
-      render();
-    });
-
-    li.append(input, timeInput, del);
-    showList.appendChild(li);
-  });
+function renderHalTabs() {
+  document.getElementById("hal-tabs").replaceChildren(...STATE.showHalls.map((hal) => {
+    const hasProblem = STATE.rows.some((r) => r.opvisningHal === hal.name && r.problemMessage);
+    const btn = tabButton(hal.name, hal.name === activeHal,
+      hasProblem ? "Der er hold i denne hal der ikke kan placeres" : "", () => setActiveHal(hal.name));
+    makeFileDropTarget(btn, hal.name);
+    return btn;
+  }));
 }
 
 function renderWarmupHalTabs() {
-  const el = document.getElementById("warmup-hal-tabs");
-  el.innerHTML = "";
-  if (!activeWarmupHal || !STATE.warmupHalls.includes(activeWarmupHal)) {
-    activeWarmupHal = STATE.warmupHalls.length ? STATE.warmupHalls[0] : null;
-  }
-  STATE.warmupHalls.forEach((name) => {
-    const hasProblem = STATE.rows.some(
-      (r) => r.opvarmningHalOverride === name && r.problemMessage
-    );
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "tab" + (name === activeWarmupHal ? " active" : "") + (hasProblem ? " has-problem" : "");
-    if (hasProblem) btn.appendChild(icon("warning"));
-    btn.appendChild(document.createTextNode(name));
-    if (hasProblem) btn.title = "Et hold der er låst til denne hal kan ikke få plads";
-    btn.addEventListener("click", () => setActiveWarmupHal(name));
+  ensureActiveWarmupHal();
+  document.getElementById("warmup-hal-tabs").replaceChildren(...STATE.warmupHalls.map((name) => {
+    const hasProblem = STATE.rows.some((r) => r.opvarmningHalOverride === name && r.problemMessage);
+    const btn = tabButton(name, name === activeWarmupHal,
+      hasProblem ? "Et hold der er låst til denne hal kan ikke få plads" : "", () => setActiveWarmupHal(name));
     makeDropTarget(btn, (draggedId) => patchRow(draggedId, "opvarmningHal", name));
-    el.appendChild(btn);
-  });
+    return btn;
+  }));
 }
 
-// Den redigerbare visning for én specifik opvarmningshal: viser hvilke hold
-// der varmer op der, hvornår de går på og i hvilken opvisningshal — kun
-// opvarmningstiden kan rettes herfra.
-function buildWarmInput(row) {
+// ---------- Opvarmning ----------
+
+// Opvarmningstid i minutter. Viser altid den tid, holdet faktisk får (fx 15),
+// så piletasterne tæller derfra og ikke fra 0.
+function buildWarmInput(row, focusPrefix) {
   const warmInput = document.createElement("input");
   warmInput.type = "number";
   warmInput.min = "0";
   warmInput.className = "form-control form-control-sm cell-input";
-  // Vis altid den tid, holdet faktisk får (fx 15), så piletasterne tæller
-  // derfra og ikke fra 0.
   warmInput.value = row.opvarmningMinOverride ?? row.opvarmningMinDefault;
-  warmInput.dataset.focusKey = `warmup-view:${row.id}`;
+  warmInput.dataset.focusKey = `${focusPrefix}:${row.id}`;
   warmInput.addEventListener("change", () => patchRow(row.id, "opvarmningMin", warmInput.value));
   return warmInput;
 }
@@ -1023,99 +1056,66 @@ function buildWarmInput(row) {
 function buildMoveHalSelect(row) {
   const moveSelect = document.createElement("select");
   moveSelect.className = "form-select form-select-sm cell-input";
-  const autoOpt = document.createElement("option");
-  autoOpt.value = "";
-  autoOpt.textContent = "Automatisk";
-  if (!row.opvarmningHalOverride) autoOpt.selected = true;
-  moveSelect.appendChild(autoOpt);
-  STATE.warmupHalls.forEach((name) => {
+  [["", "Automatisk"], ...STATE.warmupHalls.map((name) => [name, name])].forEach(([value, label]) => {
     const o = document.createElement("option");
-    o.value = name;
-    o.textContent = name;
-    if (row.opvarmningHalOverride === name) o.selected = true;
+    o.value = value;
+    o.textContent = label;
+    o.selected = (row.opvarmningHalOverride || "") === value;
     moveSelect.appendChild(o);
   });
   moveSelect.addEventListener("change", () => patchRow(row.id, "opvarmningHal", moveSelect.value));
   return moveSelect;
 }
 
+// De sidste fire celler, som begge opvarmningstabeller har.
+function appendWarmupCells(tr, row) {
+  tr.append(
+    readonlyCell(row.opvisningHal),
+    readonlyCell(row.opvisningTid, "narrow-col"),
+    cell(buildWarmInput(row, "warmup-view"), "narrow-col"),
+    cell(buildMoveHalSelect(row), "narrow-col"),
+  );
+}
+
 function renderUnplacedWarmup() {
   const section = document.getElementById("unplaced-warmup-section");
   const tbody = document.getElementById("unplaced-warmup-body");
-  tbody.innerHTML = "";
-
-  const unplaced = STATE.rows.filter((r) => r.needsWarmup && r.problemMessage);
-  if (!unplaced.length) {
-    section.classList.add("hidden");
-    return;
-  }
-  section.classList.remove("hidden");
-
-  unplaced.forEach((row) => {
+  const unplaced = unplacedRows();
+  section.classList.toggle("hidden", !unplaced.length);
+  tbody.replaceChildren(...unplaced.map((row) => {
     const tr = document.createElement("tr");
     tr.className = "table-danger";
     tr.dataset.id = row.id;
     makeDragSource(tr, row.id);
 
-    const tdHold = document.createElement("td");
-    tdHold.className = "hold-col";
     const holdText = dragHandleText(row.hold);
     holdText.classList.add("hold-name-readonly");
-    const unpinUnplaced = buildUnpinButton(row);
-    if (unpinUnplaced) holdText.appendChild(unpinUnplaced);
-    tdHold.appendChild(holdText);
-    tr.appendChild(tdHold);
+    const unpin = buildUnpinButton(row);
+    if (unpin) holdText.appendChild(unpin);
+    tr.appendChild(cell(holdText, "hold-col"));
+    appendWarmupCells(tr, row);
+    return tr;
+  }));
+}
 
-    tr.appendChild(readonlyCell(row.opvisningHal));
-    tr.appendChild(readonlyCell(row.opvisningTid, "narrow-col"));
-
-    const tdWarm = document.createElement("td");
-    tdWarm.className = "narrow-col";
-    tdWarm.appendChild(buildWarmInput(row));
-    tr.appendChild(tdWarm);
-
-    const tdMoveHal = document.createElement("td");
-    tdMoveHal.className = "narrow-col";
-    tdMoveHal.appendChild(buildMoveHalSelect(row));
-    tr.appendChild(tdMoveHal);
-
-    tbody.appendChild(tr);
-  });
+// Viser et af de tre: tabellen, en tom-besked eller "ingen haller endnu".
+function showOneOf(shown, ...ids) {
+  ids.forEach((id) => document.getElementById(id).classList.toggle("hidden", id !== shown));
 }
 
 function renderWarmupTable() {
-  const table = document.getElementById("warmup-table");
-  const emptyState = document.getElementById("warmup-empty-state");
-  const noHalState = document.getElementById("warmup-no-hal-state");
-
-  if (!activeWarmupHal || !STATE.warmupHalls.includes(activeWarmupHal)) {
-    activeWarmupHal = STATE.warmupHalls.length ? STATE.warmupHalls[0] : null;
-  }
-
+  ensureActiveWarmupHal();
+  const states = ["warmup-table", "warmup-empty-state", "warmup-no-hal-state"];
   if (!activeWarmupHal) {
-    table.classList.add("hidden");
-    emptyState.classList.add("hidden");
-    noHalState.classList.remove("hidden");
+    showOneOf("warmup-no-hal-state", ...states);
     return;
   }
-  noHalState.classList.add("hidden");
-
   const rows = STATE.rows
     .filter((r) => r.needsWarmup && r.status === "OK" && r.opvarmningHalBeregnet === activeWarmupHal)
     .sort((a, b) => (a.opvarmningStart || "").localeCompare(b.opvarmningStart || ""));
+  showOneOf(rows.length ? "warmup-table" : "warmup-empty-state", ...states);
 
-  if (!rows.length) {
-    table.classList.add("hidden");
-    emptyState.classList.remove("hidden");
-    return;
-  }
-  table.classList.remove("hidden");
-  emptyState.classList.add("hidden");
-
-  const tbody = document.getElementById("warmup-table-body");
-  tbody.innerHTML = "";
-
-  rows.forEach((row) => {
+  document.getElementById("warmup-table-body").replaceChildren(...rows.map((row) => {
     const tr = document.createElement("tr");
     tr.dataset.id = row.id;
     tr.title = "Træk til en hal-fane for at flytte holdet, eller træk hen på et tidligere hold i listen for at bytte opvarmningstid med det";
@@ -1126,54 +1126,21 @@ function renderWarmupTable() {
     });
 
     const tdTime = readonlyCell(`${row.opvarmningStart}–${row.opvarmningSlut}`, "narrow-col");
-    const unpinTime = buildUnpinButton(row);
-    if (unpinTime) tdTime.appendChild(unpinTime);
-    tr.appendChild(tdTime);
-    const tdHold = document.createElement("td");
-    tdHold.className = "readonly";
-    tdHold.appendChild(dragHandleText(row.hold));
-    tr.appendChild(tdHold);
-    tr.appendChild(readonlyCell(row.opvisningHal));
-    tr.appendChild(readonlyCell(row.opvisningTid, "narrow-col"));
-
-    const tdWarm = document.createElement("td");
-    tdWarm.className = "narrow-col";
-    tdWarm.appendChild(buildWarmInput(row));
-    tr.appendChild(tdWarm);
-
-    const tdMoveHal = document.createElement("td");
-    tdMoveHal.className = "narrow-col";
-    tdMoveHal.appendChild(buildMoveHalSelect(row));
-    tr.appendChild(tdMoveHal);
-
-    tbody.appendChild(tr);
-  });
+    const unpin = buildUnpinButton(row);
+    if (unpin) tdTime.appendChild(unpin);
+    tr.append(tdTime, cell(dragHandleText(row.hold), "readonly"));
+    appendWarmupCells(tr, row);
+    return tr;
+  }));
 }
 
-function renderHalTabs() {
-  const el = document.getElementById("hal-tabs");
-  el.innerHTML = "";
-  STATE.showHalls.forEach((hal) => {
-    const hasProblem = STATE.rows.some((r) => r.opvisningHal === hal.name && r.problemMessage);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "tab" + (hal.name === activeHal ? " active" : "") + (hasProblem ? " has-problem" : "");
-    if (hasProblem) btn.appendChild(icon("warning"));
-    btn.appendChild(document.createTextNode(hal.name));
-    if (hasProblem) btn.title = "Der er hold i denne hal der ikke kan placeres";
-    btn.addEventListener("click", () => setActiveHal(hal.name));
-    el.appendChild(btn);
-  });
-}
+// ---------- Program ----------
 
 function renderToolbar() {
   const toolbar = document.getElementById("hal-toolbar");
   const hal = STATE.showHalls.find((h) => h.name === activeHal);
-  if (!hal) {
-    toolbar.classList.add("hidden");
-    return;
-  }
-  toolbar.classList.remove("hidden");
+  toolbar.classList.toggle("hidden", !hal);
+  if (!hal) return;
   const startInput = document.getElementById("hal-start-time");
   if (document.activeElement !== startInput) {
     startInput.value = hal.startTime || "";
@@ -1181,29 +1148,16 @@ function renderToolbar() {
 }
 
 function renderTable() {
-  const table = document.getElementById("teams-table");
-  const emptyState = document.getElementById("empty-state");
-  const noHalState = document.getElementById("no-hal-state");
-
+  const states = ["teams-table", "empty-state", "no-hal-state"];
   if (!STATE.showHalls.length) {
-    table.classList.add("hidden");
-    emptyState.classList.add("hidden");
-    noHalState.classList.remove("hidden");
+    showOneOf("no-hal-state", ...states);
     return;
   }
-  noHalState.classList.add("hidden");
-
   const rows = STATE.rows
     .filter((r) => r.opvisningHal === activeHal)
     .sort((a, b) => a.order - b.order);
-
-  if (!rows.length) {
-    table.classList.add("hidden");
-    emptyState.classList.remove("hidden");
-    return;
-  }
-  table.classList.remove("hidden");
-  emptyState.classList.add("hidden");
+  showOneOf(rows.length ? "teams-table" : "empty-state", ...states);
+  if (!rows.length) return;
 
   // Fjern valg af rækker, der ikke længere findes i hallen.
   const present = new Set(rows.map((r) => r.id));
@@ -1254,34 +1208,28 @@ function renderBulkBar(rows) {
 async function onBulkMove() {
   const hal = document.getElementById("bulk-target").value;
   if (!hal || !selectedIds.size) return;
-  STATE = await apiJSON("/api/rows/move", "POST", { ids: [...selectedIds], hal });
-  selectedIds.clear();
-  lastSelectIndex = null;
-  render();
+  const ids = [...selectedIds];
+  clearSelection();
+  await update(apiJSON("/api/rows/move", "POST", { ids, hal }));
 }
 
 async function onBulkDelete() {
   const n = selectedIds.size;
   if (!n || !confirm(`Slet ${n} valgte fra programmet? Det kan ikke fortrydes.`)) return;
-  STATE = await apiJSON("/api/rows/delete", "POST", { ids: [...selectedIds] });
-  selectedIds.clear();
-  lastSelectIndex = null;
-  render();
+  const ids = [...selectedIds];
+  clearSelection();
+  await update(apiJSON("/api/rows/delete", "POST", { ids }));
 }
 
 function renderTableBody(rows) {
   const tbody = document.getElementById("table-body");
-  tbody.innerHTML = "";
-
-  rows.forEach((row, index) => {
+  tbody.replaceChildren(...rows.map((row, index) => {
     const tr = document.createElement("tr");
     tr.dataset.id = row.id;
     if (!row.needsWarmup) tr.classList.add("row-special");
     if (row.problemMessage) tr.classList.add("table-danger");
     if (selectedIds.has(row.id)) tr.classList.add("selected");
 
-    const tdSel = document.createElement("td");
-    tdSel.className = "select-col";
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.className = "form-check-input";
@@ -1289,11 +1237,9 @@ function renderTableBody(rows) {
     cb.setAttribute("aria-label", `Vælg ${row.hold}`);
     cb.title = "Vælg (hold Shift nede for at vælge flere i træk)";
     cb.addEventListener("click", (e) => toggleSelect(rows, index, cb.checked, e.shiftKey));
-    tdSel.appendChild(cb);
-    tr.appendChild(tdSel);
 
     makeDragSource(tr, row.id);
-    makeDropTarget(tr, async (draggedId) => {
+    makeDropTarget(tr, (draggedId) => {
       if (draggedId === row.id) return;
       const ids = rows.map((r) => r.id);
       const from = ids.indexOf(draggedId);
@@ -1301,14 +1247,8 @@ function renderTableBody(rows) {
       if (from === -1 || to === -1) return;
       ids.splice(from, 1);
       ids.splice(to, 0, draggedId);
-      STATE = await apiJSON("/api/rows/reorder", "POST", { hal: activeHal, orderedIds: ids });
-      render();
+      return update(apiJSON("/api/rows/reorder", "POST", { hal: activeHal, orderedIds: ids }));
     });
-
-    const tdDrag = document.createElement("td");
-    tdDrag.className = "drag-col";
-    tdDrag.appendChild(icon("drag"));
-    tr.appendChild(tdDrag);
 
     const tdHold = document.createElement("td");
     tdHold.className = "hold-col";
@@ -1331,10 +1271,7 @@ function renderTableBody(rows) {
     if (row.problemMessage) {
       tdHold.appendChild(warningMessage(row.problemMessage));
     }
-    tr.appendChild(tdHold);
 
-    const tdVarighed = document.createElement("td");
-    tdVarighed.className = "narrow-col";
     const varighedInput = document.createElement("input");
     varighedInput.type = "number";
     varighedInput.min = "0";
@@ -1342,101 +1279,69 @@ function renderTableBody(rows) {
     varighedInput.value = row.varighed;
     varighedInput.dataset.focusKey = `program-dur:${row.id}`;
     varighedInput.addEventListener("change", () => patchRow(row.id, "varighed", varighedInput.value));
-    tdVarighed.appendChild(varighedInput);
-    tr.appendChild(tdVarighed);
 
-    const tdWarm = document.createElement("td");
-    tdWarm.className = "narrow-col";
-    if (row.needsWarmup) {
-      const warmInput = document.createElement("input");
-      warmInput.type = "number";
-      warmInput.min = "0";
-      warmInput.className = "form-control form-control-sm cell-input";
-      // Vis altid den tid, holdet faktisk får (fx 15), så piletasterne tæller
-      // derfra og ikke fra 0.
-      warmInput.value = row.opvarmningMinOverride ?? row.opvarmningMinDefault;
-      warmInput.dataset.focusKey = `program-warm:${row.id}`;
-      warmInput.addEventListener("change", () => patchRow(row.id, "opvarmningMin", warmInput.value));
-      tdWarm.appendChild(warmInput);
-    } else {
-      tdWarm.classList.add("readonly");
-      tdWarm.textContent = "—";
-    }
-    tr.appendChild(tdWarm);
+    const tdWarm = row.needsWarmup
+      ? cell(buildWarmInput(row, "program-warm"), "narrow-col")
+      : readonlyCell("—", "narrow-col");
 
-    tr.appendChild(readonlyCell(row.opvisningTid || "—", "narrow-col"));
-    tr.appendChild(warmupCell(row));
-
-    const tdMoveHal = document.createElement("td");
-    tdMoveHal.className = "narrow-col";
     const halSelect = document.createElement("select");
     halSelect.className = "form-select form-select-sm cell-input";
     STATE.showHalls.forEach((hal) => {
       const o = document.createElement("option");
       o.value = hal.name;
       o.textContent = hal.name;
-      if (row.opvisningHal === hal.name) o.selected = true;
+      o.selected = row.opvisningHal === hal.name;
       halSelect.appendChild(o);
     });
     halSelect.addEventListener("change", () => patchRow(row.id, "opvisningHal", halSelect.value));
-    tdMoveHal.appendChild(halSelect);
-    tr.appendChild(tdMoveHal);
 
-    const tdAction = document.createElement("td");
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "row-delete icon-btn icon-btn-danger";
-    del.appendChild(icon("close"));
-    del.title = "Slet punkt";
-    del.addEventListener("click", confirmAndRun(
+    const del = iconButton("close", "Slet punkt", confirmAndRun(
       `Slet "${row.hold}" fra programmet?`,
       () => apiJSON(`/api/rows/${row.id}`, "DELETE")
-    ));
-    tdAction.appendChild(del);
-    tr.appendChild(tdAction);
+    ), "row-delete icon-btn-danger");
 
-    tbody.appendChild(tr);
-  });
+    const tdDrag = cell(icon("drag"), "drag-col");
+    tr.append(
+      cell(cb, "select-col"),
+      tdDrag,
+      tdHold,
+      cell(varighedInput, "narrow-col"),
+      tdWarm,
+      readonlyCell(row.opvisningTid || "—", "narrow-col"),
+      warmupCell(row),
+      cell(halSelect, "narrow-col"),
+      cell(del),
+    );
+    return tr;
+  }));
 }
 
 // Hvor og hvornår holdet varmer op — så alt om et hold står i én række.
 function warmupCell(row) {
-  const td = document.createElement("td");
-  td.className = "warmup-col";
-  if (!row.needsWarmup) {
-    td.className += " readonly";
-    td.textContent = "—";
-  } else if (row.status === "OK") {
-    td.className += " readonly";
-    td.textContent = `${row.opvarmningHalBeregnet} ${row.opvarmningStart}–${row.opvarmningSlut}`;
-  } else {
-    td.className += " warmup-missing";
-    td.textContent = "Mangler plads";
+  if (!row.needsWarmup) return readonlyCell("—", "warmup-col");
+  if (row.status === "OK") {
+    return readonlyCell(`${row.opvarmningHalBeregnet} ${row.opvarmningStart}–${row.opvarmningSlut}`, "warmup-col");
   }
+  const td = document.createElement("td");
+  td.className = "warmup-col warmup-missing";
+  td.textContent = "Mangler plads";
   return td;
 }
 
-async function patchRow(id, field, value) {
-  STATE = await apiJSON(`/api/rows/${id}`, "PATCH", { field, value });
-  render();
+function patchRow(id, field, value) {
+  return update(apiJSON(`/api/rows/${id}`, "PATCH", { field, value }));
 }
 
-async function swapWarmupTime(draggedId, targetId) {
-  STATE = await apiJSON("/api/rows/swap-warmup-time", "POST", { draggedId, targetId });
-  render();
+function swapWarmupTime(draggedId, targetId) {
+  return update(apiJSON("/api/rows/swap-warmup-time", "POST", { draggedId, targetId }));
 }
 
 // Lille knap der fjerner et fast opvarmningstidspunkt (sat ved træk-og-slip),
 // så holdet igen placeres automatisk. null hvis holdet ikke har et.
 function buildUnpinButton(row) {
   if (!row.opvarmningStartOverride) return null;
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "icon-btn";
-  btn.title = `Fast tidspunkt ${row.opvarmningStartOverride} — klik for at gøre det automatisk igen`;
-  btn.appendChild(icon("close"));
-  btn.addEventListener("click", () => patchRow(row.id, "opvarmningStart", ""));
-  return btn;
+  return iconButton("close", `Fast tidspunkt ${row.opvarmningStartOverride} — klik for at gøre det automatisk igen`,
+    () => patchRow(row.id, "opvarmningStart", ""));
 }
 
 init();

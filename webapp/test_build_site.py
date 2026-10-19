@@ -12,14 +12,7 @@ import zipfile
 from pathlib import Path
 
 import build_site
-
-PASS, FAIL = [], []
-
-
-def check(name, condition, detail=""):
-    (PASS.append(name) if condition else FAIL.append((name, detail)))
-    if not condition:
-        print(f"FAIL: {name}  {detail}")
+from testkit import check, summary
 
 
 def run():
@@ -57,8 +50,7 @@ def run():
     check("site is under GitHub Pages limits (1 GB, 100 MB per file)",
           total < 1_000_000_000 and biggest < 100_000_000, f"total={total} biggest={biggest}")
 
-    print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
-    return not FAIL
+    return summary()
 
 
 if __name__ == "__main__":

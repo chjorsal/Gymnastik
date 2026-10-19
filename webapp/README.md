@@ -14,12 +14,16 @@ python app.py
 ## Brug
 
 1. Opret dine opvarmningshaller og opvisningshaller på startsiden (eller
-   under **Haller**). Den første opvarmningshal bliver prioritetshal.
-2. Upload en eller flere Excel-filer med hold (kolonnerne `Tid`, `Varighed`,
-   `Holdnavn`/`Forening`, `Antal deltagere`, evt. `Holdtype` og `Alder`).
-   Hver fil bliver sin egen opvisningshal (fane øverst i listen), med et
-   startklokkeslæt der foreslås ud fra filens første `Tid`-værdi — ret det
-   under **Haller** eller direkte i værktøjslinjen over listen.
+   under **Haller**). Den første opvarmningshal bliver prioritetshal. En ny
+   plan starter med opvisningshallen **Hal 1**; navn og starttid rettes
+   direkte i listen.
+2. Træk hver Excel-fil (kolonnerne `Tid`, `Varighed`, `Holdnavn`/`Forening`,
+   `Antal deltagere`, evt. `Holdtype` og `Alder`) ind på den opvisningshal,
+   den hører til — på startsiden, i oversigten eller på hal-fanerne under
+   Program. Flere filer på én gang lægges alle i den samme hal. Knappen
+   **Indlæs Excel** lægger filen i den hal, der er åben under Program (ellers
+   den første; findes der ingen, oprettes Hal 1). En tom hal får starttiden
+   fra filens første `Tid`, medmindre du selv har skrevet en.
 3. **Opvisningstiden beregnes automatisk**: for hver opvisningshal lægges
    varighederne sammen i rækkefølge, startende fra hallens startklokkeslæt
    (fx start kl. 9:00, første punkt tager 30 min → næste punkt er kl. 9:30).
@@ -31,9 +35,10 @@ python app.py
 5. Ret holdnavn, varighed og opvarmningstid direkte i listen — resten af
    Excel-informationen (forening, antal, holdtype, alder) bruges stadig i
    baggrunden til opvarmningsberegningen, men vises ikke i listen.
-6. Klik **Hent Excel-plan** for at downloade den beregnede opvarmningsplan som
-   Excel-dokument (samme opbygning som generation 1.0: Output, OpvarmningPlan,
-   ét ark pr. opvarmningshal, m.m.).
+6. Klik **Hent Excel-plan**, skriv et filnavn (der foreslås et, og det sidst
+   brugte huskes) og klik **Hent** for at downloade den beregnede
+   opvarmningsplan som Excel-dokument (ét ark pr. opvisningshal, Output,
+   OpvarmningPlan, ét ark pr. opvarmningshal m.m.).
 
 Data gemmes løbende i `state.json` i denne mappe, så du ikke mister noget ved
 at genstarte serveren.
@@ -55,6 +60,7 @@ engine/             beregningsmotoren — bruges af både hjemmesiden og scripte
   export.py         plan -> Excel-fil
 static/             frontend (HTML, CSS, JS); api.js vælger server eller browser
 build_site.py       bygger browserudgaven til ../site
+testkit.py          fælles hjælpere til testene (check, Excel-filer, server)
 ```
 
 ## To udgaver

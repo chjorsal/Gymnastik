@@ -2,7 +2,6 @@
 
 Alle tal kan stadig overstyres pr. hold i brugerfladen."""
 
-BUFFER_MIN = 0
 SKIFTE_MIN = 0
 SKIFTE_I_SLOTTET_MIN = 0
 STEP_MIN = 1

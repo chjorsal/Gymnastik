@@ -43,7 +43,7 @@ body { background: var(--chalk); -webkit-font-smoothing: antialiased; }
 .hidden { display: none !important; }
 
 /* klokkeslæt står lige under hinanden */
-.tnum, td.narrow-col, .start-time-input, .hall-time-input, .hall-row-time { font-variant-numeric: tabular-nums; }
+td.narrow-col, .start-time-input, .hall-time-input, .hall-row-time { font-variant-numeric: tabular-nums; }
 
 :focus-visible { outline: 2px solid var(--mat); outline-offset: 2px; }
 .form-control:focus, .form-select:focus { border-color: var(--mat); box-shadow: 0 0 0 3px var(--bs-focus-ring-color); }
@@ -144,7 +144,7 @@ body { background: var(--chalk); -webkit-font-smoothing: antialiased; }
 
 /* ---------- Oversigt: kom i gang ---------- */
 
-.onboarding { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+.onboarding { max-width: 640px; }
 
 .steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: flex; flex-direction: column; }
 .step { counter-increment: step; display: grid; grid-template-columns: 32px 1fr; gap: 14px; padding-bottom: 24px; position: relative; }
@@ -164,25 +164,36 @@ body { background: var(--chalk); -webkit-font-smoothing: antialiased; }
 .step-title { font-size: 16px; font-weight: 600; margin: 5px 0 4px; }
 .step-text { color: var(--slate); margin: 0 0 10px; max-width: 46ch; }
 .step-body { min-width: 0; }
-.onb-list { list-style: none; margin: 0; padding: 0; max-width: 460px; }
-.onb-list:not(:empty) { border-top: 1px solid var(--line-soft); }
-.onb-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
-.onb-item-name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.onb-item-meta { color: var(--slate); font-variant-numeric: tabular-nums; }
-.onb-item .prio { color: #d49a00; font-size: 12.5px; font-weight: 500; }
-.onb-item .btn { padding: 2px 10px; }
 .steps .add-form { max-width: 460px; }
 
-.dropzone {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  min-height: 260px; padding: 32px;
-  border: 2px dashed #c3cad6; border-radius: 12px; background: var(--surface);
-  color: var(--slate); text-align: center; cursor: pointer;
+/* Haller: samme rækker på "Kom i gang" og i sidepanelet. Navn og starttid
+   rettes direkte i feltet; kanten vises først, når man peger på det. */
+.hall-list { list-style: none; margin: 0; padding: 0; max-width: 460px; }
+.hall-list:not(:empty) { border-top: 1px solid var(--line-soft); }
+.hall-item {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+  padding: 6px 0; border-bottom: 1px solid var(--line-soft); border-radius: 6px;
+}
+.hall-item-row { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; min-width: 0; }
+.hall-item .prio { color: #d49a00; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.hall-name-input { flex: 1; min-width: 0; font-weight: 500; }
+.hall-name-input, .hall-time-input { border-color: transparent; background-color: transparent; }
+.hall-name-input:hover, .hall-time-input:hover { border-color: var(--line); }
+.hall-time-input { flex: 0 0 76px; text-align: center; }
+
+/* Felt at trække en Excel-fil ind på (én pr. opvisningshal). */
+.hall-drop {
+  flex: 1 1 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 12px; margin-bottom: 4px;
+  border: 2px dashed #c3cad6; border-radius: var(--radius); background: var(--surface);
+  color: var(--slate); font: inherit; cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
-.dropzone svg { color: var(--mat); margin-bottom: 6px; }
-.dropzone:hover, .dropzone.drag-over { border-color: var(--mat); background: var(--mat-soft); }
-.dropzone-title { font-size: 16px; font-weight: 600; color: var(--ink); }
+.hall-drop .icon svg { width: 18px; height: 18px; color: var(--mat); }
+.hall-drop:hover { border-color: var(--mat); color: var(--ink); }
+.file-over .hall-drop, .hall-drop.file-over { border-color: var(--mat); background: var(--mat-soft); color: var(--ink); }
+.hall-item.file-over { background: var(--mat-soft); }
+.hall-row.file-over, .tab.file-over { background: var(--mat-soft); outline: 2px dashed var(--mat); outline-offset: -2px; }
 
 /* ---------- Oversigt: med data ---------- */
 
@@ -324,12 +335,10 @@ tr.table-danger > td { background: var(--signal-soft) !important; }
 .hall-group { margin-bottom: 32px; }
 .hall-group-title { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
 .hall-group-text { color: var(--slate); margin: 0 0 10px; }
-.hall-group .list-group-item { background: transparent; padding: 6px 0; border-color: var(--line-soft); }
-.list-group-item input.form-control { border-color: transparent; }
-.list-group-item input.form-control:hover { border-color: var(--line); }
-.hall-time-input { flex: 0 0 76px !important; text-align: center; }
 .add-form { display: flex; gap: 8px; margin-top: 10px; }
 .danger-zone { padding-top: 20px; border-top: 1px solid var(--line); }
+
+.modal-title { font-size: 18px; font-weight: 650; }
 
 /* ---------- Indlæsningsskærm (browserudgaven) ---------- */
 

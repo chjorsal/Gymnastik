@@ -9,7 +9,7 @@ import pandas as pd
 
 from .config import DEFAULT_VARIGHED, TYPE_LABELS
 from .rules import classify_type, read_holdtype
-from .values import _clean_str, _none_if_nan, new_id, parse_clock
+from .values import clean_str, new_id, none_if_missing, parse_clock, to_clock
 
 
 _DAY_NAMES = {"mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"}
@@ -51,8 +51,8 @@ def load_excel_bytes(filename: str, content: bytes, show_hal: str, start_order: 
     suggested_start = None
     order = start_order
     for _, r in df.iterrows():
-        holdnavn = _clean_str(r.get("Holdnavn"))
-        forening = _clean_str(r.get("Forening"))
+        holdnavn = clean_str(r.get("Holdnavn"))
+        forening = clean_str(r.get("Forening"))
         hold = holdnavn if holdnavn else forening
 
         antal = pd.to_numeric(r.get("Antal deltagere"), errors="coerce")
@@ -61,8 +61,8 @@ def load_excel_bytes(filename: str, content: bytes, show_hal: str, start_order: 
         varighed = pd.to_numeric(r.get("Varighed"), errors="coerce")
         varighed = DEFAULT_VARIGHED["hold"] if pd.isna(varighed) else max(0, int(varighed))
 
-        holdtype_raw = _none_if_nan(r.get("Holdtype"))
-        alder_raw = _none_if_nan(r.get("Alder"))
+        holdtype_raw = none_if_missing(r.get("Holdtype"))
+        alder_raw = none_if_missing(r.get("Alder"))
 
         row_type = classify_type(hold)
         if row_type in TYPE_LABELS and not hold:
@@ -74,48 +74,45 @@ def load_excel_bytes(filename: str, content: bytes, show_hal: str, start_order: 
             hold = TYPE_LABELS[row_type]
 
         if suggested_start is None:
-            tid = _clean_str(r.get("Tid"))
-            if tid:
-                try:
-                    t = pd.to_datetime(tid, errors="coerce")
-                    if not pd.isna(t):
-                        suggested_start = f"{t.hour:02d}:{t.minute:02d}"
-                except Exception:
-                    pass
+            hm = to_clock(r.get("Tid"))
+            if hm:
+                suggested_start = f"{hm[0]:02d}:{hm[1]:02d}"
 
-        rows.append({
-            "id": new_id(),
-            "Hold": hold,
-            "Type": row_type,
-            "AntalPersoner": antal,
-            "HoldtypeRaw": None if holdtype_raw is None else str(holdtype_raw),
-            "AlderRaw": None if alder_raw is None else str(alder_raw),
-            "OpvisningHal": show_hal,
-            "Varighed": varighed,
-            "OpvarmningMinOverride": None,
-            "OpvarmningHalOverride": None,
-            "OpvarmningStartOverride": None,
-            "Order": order,
-        })
+        rows.append(new_row(
+            hold, row_type, show_hal, varighed, order,
+            AntalPersoner=antal,
+            HoldtypeRaw=None if holdtype_raw is None else str(holdtype_raw),
+            AlderRaw=None if alder_raw is None else str(alder_raw),
+        ))
         order += 1
     return rows, suggested_start
 
 
-def new_special_row(show_hal: str, row_type: str, order: int, varighed: Optional[int] = None) -> dict:
-    return {
+def new_row(hold: str, row_type: str, show_hal: str, varighed: int, order: int, **extra) -> dict:
+    """Et programpunkt i planen (rå række). extra overskriver standardfelterne,
+    fx AntalPersoner, OpvarmningMinOverride eller Manual."""
+    row = {
         "id": new_id(),
-        "Hold": TYPE_LABELS.get(row_type, "Andet"),
+        "Hold": hold,
         "Type": row_type,
         "AntalPersoner": 0,
         "HoldtypeRaw": None,
         "AlderRaw": None,
         "OpvisningHal": show_hal,
-        "Varighed": varighed if varighed is not None else DEFAULT_VARIGHED.get(row_type, 10),
+        "Varighed": varighed,
         "OpvarmningMinOverride": None,
         "OpvarmningHalOverride": None,
         "OpvarmningStartOverride": None,
         "Order": order,
     }
+    row.update(extra)
+    return row
+
+
+def new_special_row(show_hal: str, row_type: str, order: int, varighed: Optional[int] = None) -> dict:
+    if varighed is None:
+        varighed = DEFAULT_VARIGHED.get(row_type, 10)
+    return new_row(TYPE_LABELS.get(row_type, "Andet"), row_type, show_hal, varighed, order)
 
 
 def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFrame:

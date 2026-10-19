@@ -13,16 +13,7 @@ import pandas as pd
 from planner import actions
 from planner.actions import ActionError
 
-PASS = []
-FAIL = []
-
-
-def check(name, condition, detail=""):
-    if condition:
-        PASS.append(name)
-    else:
-        FAIL.append((name, detail))
-        print(f"FAIL: {name}  {detail}")
+from testkit import check, excel_bytes, summary
 
 
 def raises(fn, status=None):
@@ -34,20 +25,6 @@ def raises(fn, status=None):
             return e
         return None
     return None
-
-
-def excel_bytes(teams):
-    """Lav en lille Excel-fil i hukommelsen. teams: [(holdnavn, varighed)]."""
-    df = pd.DataFrame({
-        "Tid": ["09:00"] + [""] * (len(teams) - 1),
-        "Varighed": [v for _, v in teams],
-        "Holdnavn": [n for n, _ in teams],
-        "Antal deltagere": [20] * len(teams),
-        "Alder": ["voksen"] * len(teams),
-    })
-    buf = BytesIO()
-    df.to_excel(buf, index=False)
-    return buf.getvalue()
 
 
 def plan_with_halls():
@@ -110,8 +87,90 @@ def run():
 
     plan2 = actions.new_plan()
     actions.upload(plan2, [("202609554902_Lørdag_Arena_færdig.xlsx", excel_bytes([("A", 10)]))])
-    check("upload without halls creates hall from cleaned file name",
-          plan2["show_halls"] == [{"name": "Arena", "startTime": "09:00"}], plan2["show_halls"])
+    check("upload without any hall creates 'Hal 1' (not a name from the file)",
+          plan2["show_halls"] == [{"name": "Hal 1", "startTime": "09:00"}], plan2["show_halls"])
+    plan3 = plan_with_halls()
+    actions.upload(plan3, [("Hal2.xlsx", excel_bytes([("A", 10)]))])
+    check("upload without a chosen hall uses the first show hall",
+          plan3["raw_rows"][0]["OpvisningHal"] == "Sal A" and len(plan3["show_halls"]) == 2)
+
+    # ---------- standardhallen Hal 1 og træk af filer ind på en hal ----------
+    sp = actions.start_plan()
+    check("start_plan has one show hall 'Hal 1' at 09:00 and nothing else",
+          sp == {"warmup_halls": [], "priority_hall": None,
+                 "show_halls": [{"name": "Hal 1", "startTime": "09:00"}], "raw_rows": []}, sp)
+    check("start_plan returns a fresh copy", actions.start_plan()["show_halls"] is not sp["show_halls"])
+    check("new_plan stays empty (used for migration and tests)", actions.new_plan()["show_halls"] == [])
+
+    actions.upload(sp, [("Arena.xlsx", excel_bytes([("A", 10)], start="10:30"))], show_hal="Hal 1")
+    check("file dropped on the empty default hall lands there, not in a hall named after the file",
+          [h["name"] for h in sp["show_halls"]] == ["Hal 1"] and sp["raw_rows"][0]["OpvisningHal"] == "Hal 1")
+    check("empty hall without a typed start time takes the file's first Tid",
+          sp["show_halls"][0]["startTime"] == "10:30", sp["show_halls"])
+    actions.upload(sp, [("Mere.xlsx", excel_bytes([("B", 10)], start="13:00"))], show_hal="Hal 1")
+    check("a second file in a hall with teams keeps the hall's start time and goes last",
+          sp["show_halls"][0]["startTime"] == "10:30" and [r["Order"] for r in sp["raw_rows"]] == [0, 1])
+
+    sp = actions.start_plan()
+    actions.set_show_hall_start_time(sp, "Hal 1", "8.15")
+    actions.upload(sp, [("x.xlsx", excel_bytes([("A", 10)], start="10:30"))], show_hal="Hal 1")
+    check("a start time the user typed is never overwritten by the file",
+          sp["show_halls"][0]["startTime"] == "08:15", sp["show_halls"])
+
+    sp = actions.start_plan()
+    actions.create_show_hall(sp, "Hal 2")
+    actions.upload(sp, [("a.xlsx", excel_bytes([("A1", 10), ("A2", 10)])),
+                        ("b.xlsx", excel_bytes([("B1", 10)]))], show_hal="Hal 2")
+    check("several files dropped on one hall all go into that hall, in file order",
+          [(r["Hold"], r["OpvisningHal"], r["Order"]) for r in sp["raw_rows"]]
+          == [("A1", "Hal 2", 0), ("A2", "Hal 2", 1), ("B1", "Hal 2", 2)], sp["raw_rows"])
+    check("Hal 1 stays empty when files go to Hal 2", not [r for r in sp["raw_rows"] if r["OpvisningHal"] == "Hal 1"])
+
+    empty = actions.new_plan()
+    actions.upload(empty, [("Arena_færdig.xlsx", excel_bytes([("A", 10)], start="11:00"))], show_hal="Hal 1")
+    check("upload button with no halls creates 'Hal 1' with the file's start time",
+          empty["show_halls"] == [{"name": "Hal 1", "startTime": "11:00"}], empty["show_halls"])
+
+    # ---------- omdøb haller: navne skal være unikke ----------
+    rp = plan_with_halls()
+    actions.upload(rp, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal A")
+    before = copy.deepcopy(rp)
+    err = raises(lambda: actions.rename_show_hall(rp, "Sal A", " Sal B "), 400)
+    check("renaming a show hall to an existing name -> 400, nothing merged",
+          err is not None and "Sal B" in err.message and rp == before, err and err.message)
+    err = raises(lambda: actions.rename_warmup_hall(rp, "Varm 1", "Varm 2"), 400)
+    check("renaming a warm-up hall to an existing name -> 400, unchanged",
+          err is not None and rp == before, err and err.message)
+    actions.rename_show_hall(rp, "Sal A", "Sal A")
+    actions.rename_warmup_hall(rp, "Varm 1", "Varm 1")
+    check("renaming a hall to its own name is allowed and changes nothing", rp == before)
+    actions.rename_show_hall(rp, "Sal A", "Arena")
+    check("renaming a show hall moves its teams along",
+          [h["name"] for h in rp["show_halls"]] == ["Arena", "Sal B"] and rp["raw_rows"][0]["OpvisningHal"] == "Arena")
+
+    # ---------- filnavn til Excel-eksporten ----------
+    cases = {
+        "Opvarmningsplan Lørdag": "Opvarmningsplan Lørdag.xlsx",
+        "  plan  med   luft  ": "plan med luft.xlsx",
+        "Arena/Hal2: lørdag?": "Arena Hal2 lørdag.xlsx",
+        'a<b>c"d|e*f\\g': "a b c d e f g.xlsx",
+        "tab\tog\nlinje": "tab og linje.xlsx",
+        "Plan.XLSX": "Plan.xlsx",
+        "Plan.xlsx.xlsx": "Plan.xlsx.xlsx",
+        "punktum til sidst...": "punktum til sidst.xlsx",
+        "": "opvisning_med_opvarmning.xlsx",
+        None: "opvisning_med_opvarmning.xlsx",
+        "   ": "opvisning_med_opvarmning.xlsx",
+        "///": "opvisning_med_opvarmning.xlsx",
+        "CON": "CON_.xlsx",
+        "lpt1.plan": "lpt1_.plan.xlsx",
+        "console": "console.xlsx",
+    }
+    got = {k: actions.export_filename(k) for k in cases}
+    check("export_filename cleans names (illegal chars, spaces, .xlsx, empty, reserved)", got == cases,
+          {k: v for k, v in got.items() if v != cases[k]})
+    long_name = actions.export_filename("x" * 300)
+    check("export_filename caps the name at 100 characters + .xlsx", long_name == "x" * 100 + ".xlsx", len(long_name))
 
     # ---------- rækker ----------
     plan = plan_with_halls()
@@ -399,7 +458,7 @@ def run():
     from planner import browser
 
     res = json.loads(browser.load(""))
-    check("bridge load('') gives an empty plan", res["ok"] and res["plan"] == actions.new_plan())
+    check("bridge load('') gives the start plan with Hal 1", res["ok"] and res["plan"] == actions.start_plan())
     res = json.loads(browser.load('{"show_halls": ["Gammel"]}'))
     check("bridge load migrates an old plan", res["ok"] and res["plan"]["show_halls"][0]["name"] == "Gammel")
     check("bridge load reports broken JSON", json.loads(browser.load("{ødelagt"))["ok"] is False)
@@ -433,16 +492,18 @@ def run():
           res2["ok"] is False and "skrald.xlsx" in res2["error"])
 
     out = os.path.join(tmpdir, "ud.xlsx")
-    check("bridge export_to writes an xlsx",
-          json.loads(browser.export_to(json.dumps(res["plan"]), out))["ok"] and open(out, "rb").read(2) == b"PK")
+    exp = json.loads(browser.export_to(json.dumps(res["plan"]), out))
+    check("bridge export_to writes an xlsx with the default name",
+          exp == {"ok": True, "filename": "opvisning_med_opvarmning.xlsx"} and open(out, "rb").read(2) == b"PK", exp)
+    exp = json.loads(browser.export_to(json.dumps(res["plan"]), out, "Lørdag: Arena"))
+    check("bridge export_to returns the cleaned user name", exp["filename"] == "Lørdag Arena.xlsx", exp)
 
     res = json.loads(browser.import_plan("ikke json"))
     check("bridge import_plan rejects bad file", res == {"ok": False, "error": "Filen er ikke en gyldig plan.", "status": 400})
     res = json.loads(browser.import_plan(plan_json))
     check("bridge import_plan accepts a saved plan", res["ok"] and res["plan"]["warmup_halls"] == ["Varm 1"])
 
-    print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
-    return not FAIL
+    return summary()
 
 
 if __name__ == "__main__":
