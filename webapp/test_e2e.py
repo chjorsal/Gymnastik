@@ -35,16 +35,16 @@ def common_flow(page, url, xlsx, dialogs, errors):
         page.wait_for_function(f"document.querySelectorAll('#onb-warmup-list li').length === {i}")
     check("første opvarmningshal er prioritetshal fra start",
           page.evaluate("() => STATE.priorityHall") == "Varm 1"
-          and "Prioritetshal" in page.locator("#onb-warmup-list li").first.inner_text())
+          and "Efterskoler først" in page.locator("#onb-warmup-list li").first.inner_text())
     page.locator("#onb-warmup-list li").nth(1).locator(".star").click()
     page.wait_for_function("() => STATE.priorityHall === 'Varm 2'")
-    check("stjernen gør en anden hal til prioritetshal", "Prioritetshal" in page.locator("#onb-warmup-list li").nth(1).inner_text())
+    check("stjernen gør en anden hal til prioritetshal", "Efterskoler først" in page.locator("#onb-warmup-list li").nth(1).inner_text())
     page.locator("#onb-warmup-list li").first.locator(".star").click()
     page.wait_for_function("() => STATE.priorityHall === 'Varm 1'")
     first = page.locator("#onb-show-list li").first
-    check("ny plan starter med opvisningshallen Hal 1 (trin 2 er klaret)",
+    check("ny plan starter med opvisningshallen Hal 1, og trin 2 er det næste",
           page.locator("#onb-show-list li").count() == 1 and first.locator(".hall-name-input").input_value() == "Hal 1"
-          and "done" in page.get_attribute("#step-show", "class"))
+          and "current" in page.get_attribute("#step-show", "class"))
     old_time = first.locator(".hall-time-input").element_handle()
     first.locator(".hall-name-input").fill("Sal A")
     first.locator(".hall-name-input").press("Tab")
@@ -114,7 +114,7 @@ def common_flow(page, url, xlsx, dialogs, errors):
 
     # tilføj et hold i hånden (tilmelding på bagkant)
     page.click(".rail-link[data-view=program]")
-    page.click("#btn-add-team")
+    add_from_menu(page, "#btn-add-team")
     page.wait_for_function("() => STATE.rows.some(r => r.hold === 'Sent hold')")
     sent = page.evaluate("() => STATE.rows.find(r => r.hold === 'Sent hold')")
     # (om der er plads til opvarmningen afhænger af hallerne; det testes i test_actions)
@@ -177,7 +177,7 @@ def browser_only(browser, context, page, url, dialogs):
     other.goto(url)
     other.wait_for_selector("#overview-data:not(.hidden)", timeout=120_000)
     page.click(".rail-link[data-view=program]")
-    page.click(".add-special[data-type=pause]")
+    add_from_menu(page, ".add-special[data-type=pause]")
     other.wait_for_function(f"() => STATE.rows.length === {rows + 1}", timeout=10_000)
     check("ændring i én fane vises i den anden", other.evaluate("() => STATE.rows.length") == rows + 1)
     other.close()
@@ -274,7 +274,7 @@ def new_features(page, tmp, dialogs):
     import re as _re
     check("Program viser opvarmningshal og tid for hvert hold",
           cells and all(_re.match(r"^.+ \d\d:\d\d–\d\d:\d\d$", c) or c == "Mangler plads" for c in cells), cells)
-    page.click(".add-special[data-type=pause]")
+    add_from_menu(page, ".add-special[data-type=pause]")
     page.wait_for_selector("#table-body tr.row-special")
     special = page.locator("#table-body tr.row-special td.warmup-col").first.inner_text()
     check("specialpunkter viser — i stedet for opvarmning", special == "—", special)
@@ -311,20 +311,14 @@ def new_features(page, tmp, dialogs):
     unplaced = page.evaluate("() => STATE.rows.filter(r => r.status !== 'OK').map(r => r.hold)")
     check("scenarie: B, D og F mangler plads", unplaced == ["B", "D", "F"], unplaced)
 
-    page.wait_for_selector("#suggestion-list .btn-primary", timeout=60_000)
-    lines = page.locator("#suggestion-list li").all_inner_texts()
-    check("forslag: F med 12 min i Varm 1 09:43–09:55",
-          any(l.startswith("F") and "12 min" in l and "Varm 1 09:43–09:55" in l for l in lines), lines)
-    check("D får besked om, at der ikke er plads selv med 10 min",
-          any(l.startswith("D") and "10 min" in l and "Brug forslag" not in l for l in lines), lines)
-    page.locator("#suggestion-list li", has_text="F (går på").locator(".btn-primary").click()
-    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'F').status === 'OK'")
+    check("den røde linje har én knap: Find løsning",
+          "Find løsning" in page.inner_text("#problem-banner .banner-action")
+          and page.locator("text=Brug forslag").count() == 0 and page.locator("text=Løs det").count() == 0)
+    f_id = page.evaluate("() => STATE.rows.find(r => r.hold === 'F').id")
+    api(page, "PATCH", f"/api/rows/{f_id}", {"field": "opvarmningMin", "value": 12})
+    refresh(page)
     f = page.evaluate("() => STATE.rows.find(r => r.hold === 'F')")
-    check("Brug forslag giver F 12 min og plads", (f["opvarmningMinOverride"], f["opvarmningStart"]) == (12, "09:43"), f)
-    page.wait_for_function("() => !document.querySelector('#suggestion-list').innerText.includes('Beregner')")
-    lines = page.locator("#suggestion-list li").all_inner_texts()
-    check("forslagene beregnes forfra efter en ændring",
-          [l[0] for l in lines] == ["B", "D"] and all("Brug forslag" not in l for l in lines), lines)
+    check("F får plads med 12 min opvarmning", (f["status"], f["opvarmningStart"]) == ("OK", "09:43"), f)
 
     # 3: træk D ind i et hul på tidslinjen
     tl = page.evaluate("() => { const d = document.getElementById('timeline').dataset;"
@@ -347,8 +341,14 @@ def new_features(page, tmp, dialogs):
                        " return {from: +d.from, span: +d.span, w: +d.trackW}; }")
     page.locator(".tl-lane-problem .tl-block").first.drag_to(lane, target_position={"x": x_at("08:20"), "y": 20})
     page.wait_for_function("() => STATE.rows.find(r => r.hold === 'B').status === 'OK'")
-    check("ingen hold uden plads -> ingen forslag og ingen rød række",
-          page.is_hidden("#suggestions") and page.locator(".tl-lane-problem").count() == 0)
+    check("ingen hold uden plads -> ingen rød linje og ingen rød række",
+          page.is_hidden("#problem-banner") and page.locator(".tl-lane-problem").count() == 0)
+
+
+def add_from_menu(page, item):
+    """Åbner "+ Tilføj"-menuen under Program og vælger et punkt i den."""
+    page.click("#btn-add-menu")
+    page.click(item)
 
 
 def drop_files(page, selector, files):
@@ -427,6 +427,23 @@ def drop_tests(page, tmp, dialogs):
           page.evaluate("() => STATE.showHalls.map(h => h.name)") == ["Hal 1"] and rows_in("Hal 1") == ["C2"])
 
 
+def ux_tests(page):
+    """Det nye udseende: faner med antal og "fast tid · slip"."""
+    page.click(".rail-link[data-view=program]")
+    count = page.locator("#hal-tabs .tab", has_text="Sal A").locator(".tab-count").inner_text()
+    check("fanen viser antal hold i hallen", count == "6", count)
+    page.click(".rail-link[data-view=opvarmning]")
+    pinned = lambda: page.evaluate("() => STATE.rows.filter(r => r.opvarmningStartOverride).length")
+    n = pinned()
+    note = page.locator("#warmup-table-body .pin-note").first
+    check("et hold med fast tid viser 'fast tid · slip'", n > 0 and "fast tid" in note.inner_text(), (n, note.inner_text()))
+    note.locator(".pin-release").click()
+    page.wait_for_function(f"() => STATE.rows.filter(r => r.opvarmningStartOverride).length === {n - 1}")
+    check("slip gør holdets tid automatisk igen", True)
+    check("problemrækker har ingen lyserød Bootstrap-flade",
+          page.locator("tr.table-danger").count() == 0)
+
+
 def bulk_tests(page, dialogs):
     """Vælg flere hold og flyt eller slet dem på én gang."""
     page.click(".rail-link[data-view=program]")
@@ -489,7 +506,16 @@ def solve_tests(page, tmp):
     before = missing()
     check("scenarie til Find løsning: B, D og F mangler plads", before == ["B", "D", "F"], before)
 
-    page.click("#btn-solve")
+    page.click(".rail-link[data-view=opvarmning]")
+    check("Opvarmning viser antallet af hold uden plads øverst",
+          page.inner_text("#unplaced-title").strip() == "3 hold mangler plads til opvarmning", page.inner_text("#unplaced-title"))
+    page.click("#btn-solve-warmup")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    check("Find løsning på Opvarmning viser løsningen på oversigten",
+          page.evaluate("() => currentView") == "oversigt" and missing() == before)
+    page.click("#solve-result >> text=Annullér")
+
+    page.click("#problem-banner")
     page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
     text = page.inner_text("#solve-result")
     check("Find løsning viser hvilke hold der får plads og hvad der forkortes", "får plads" in text and "→" in text, text)
@@ -498,7 +524,7 @@ def solve_tests(page, tmp):
     page.click("#solve-result >> text=Annullér")
     check("Annullér skjuler løsningen og ændrer intet", page.is_hidden("#solve-result") and missing() == before)
 
-    page.click("#btn-solve")
+    page.click("#problem-banner")
     page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
     api(page, "POST", "/api/rows/special", {"hal": "Sal A", "type": "pause"})
     refresh(page)
@@ -506,7 +532,7 @@ def solve_tests(page, tmp):
     api(page, "DELETE", "/api/rows/" + page.evaluate("() => STATE.rows.find(r => r.type === 'pause').id"))
     refresh(page)
 
-    page.click("#btn-solve")
+    page.click("#problem-banner")
     page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
     page.click("#solve-result >> text=Brug løsningen")
     page.wait_for_function(f"() => STATE.rows.filter(r => r.status !== 'OK').length < {len(before)}")
@@ -546,6 +572,7 @@ def run(mode):
             page.on("pageerror", lambda e: errors.append(str(e)))
             common_flow(page, url, xlsx, dialogs, errors)
             new_features(page, tmp, dialogs)
+            ux_tests(page)
             bulk_tests(page, dialogs)
             solve_tests(page, tmp)
             drop_tests(page, tmp, dialogs)

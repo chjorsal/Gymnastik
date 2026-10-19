@@ -20,3 +20,6 @@ opvisning_med_opvarmning.xlsx
 site/
 webapp/.build-cache/
 webapp/state.backup-*.json
+
+# Skitser fra brainstorm
+.superpowers/

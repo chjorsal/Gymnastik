@@ -65,7 +65,6 @@ const Api = (() => {
     ["DELETE", /^\/api\/rows\/([^/]+)$/, (m) => ["delete_row", { row_id: decodeURIComponent(m[1]) }]],
     ["POST", /^\/api\/rows\/special$/, (m, b) => ["add_special_row", { hal: b.hal, row_type: b.type }]],
     ["POST", /^\/api\/rows\/([^/]+)\/place$/, (m, b) => ["place_warmup", { row_id: decodeURIComponent(m[1]), hal: b.hal, start: b.start }]],
-    ["GET", /^\/api\/suggestions$/, () => ["suggestions", {}]],
     ["GET", /^\/api\/solve$/, () => ["solve", {}]],
     ["POST", /^\/api\/warmup-minutes$/, (m, b) => ["apply_warmup_minutes", { changes: b.changes }]],
     ["POST", /^\/api\/rows\/move$/, (m, b) => ["move_rows", { row_ids: b.ids, hal: b.hal }]],
@@ -178,7 +177,6 @@ const Api = (() => {
       const route = ROUTES.find(([m, re]) => m === method && re.test(url));
       if (!route) throw new ApiError(`Ukendt handling: ${method} ${url}`, 400);
       const [name, args] = route[2](url.match(route[1]), body || {});
-      if (name === "suggestions") return JSON.parse(bridge.suggestions(planJson));
       if (name === "solve") return JSON.parse(bridge.solve(planJson));
       return answer(bridge.call(planJson, name, JSON.stringify(args)), name !== "payload");
     },
