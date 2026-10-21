@@ -106,7 +106,7 @@ def build_workbook(df_all: pd.DataFrame, show_halls: Optional[List[str]] = None)
         # Ét ark pr. opvisningshal forrest — programmet i rækkefølge, klar
         # til at lægge ind i andre systemer.
         for hal in show_halls:
-            hal_rows = out[out["OpvisningHal"] == hal].sort_values("Order")
+            hal_rows = out[out["OpvisningHal"] == hal].sort_values("Order", kind="stable")
             sheet_name = _sheet_name(f"Opvisning {hal}", used)
             hal_rows[export_cols].to_excel(writer, index=False, sheet_name=sheet_name)
             _style_hal_sheet(writer.sheets[sheet_name])

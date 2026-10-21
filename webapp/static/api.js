@@ -21,6 +21,16 @@ const Api = (() => {
     return data;
   }
 
+  // fetch, der ikke kan komme igennem (serveren er lukket, computeren har
+  // sovet, intet net), giver en dansk besked i stedet for "Failed to fetch".
+  async function send(url, init) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      throw new ApiError("Ingen forbindelse til planlæggeren. Tjek at den kører, og prøv igen.", 0);
+    }
+  }
+
   function download(blob, filename) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -40,18 +50,18 @@ const Api = (() => {
         init.headers = { "Content-Type": "application/json" };
         init.body = JSON.stringify(body);
       }
-      return readJson(await fetch(url, init));
+      return readJson(await send(url, init));
     },
     async upload(files, hal) {
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f));
       if (hal) fd.append("show_hal", hal);
-      return readJson(await fetch("/api/upload", { method: "POST", body: fd }));
+      return readJson(await send("/api/upload", { method: "POST", body: fd }));
     },
     async uploadToHalls(items) {
       const fd = new FormData();
       items.forEach(({ file, hal }) => { fd.append("files", file); fd.append("halls", hal); });
-      return readJson(await fetch("/api/upload-halls", { method: "POST", body: fd }));
+      return readJson(await send("/api/upload-halls", { method: "POST", body: fd }));
     },
     async exportPlan(name) {
       window.location.href = `/api/export.xlsx?name=${encodeURIComponent(name || "")}`;
@@ -71,7 +81,7 @@ const Api = (() => {
     ["POST", /^\/api\/rows\/special$/, (m, b) => ["add_special_row", { hal: b.hal, row_type: b.type }]],
     ["POST", /^\/api\/rows\/([^/]+)\/place$/, (m, b) => ["place_warmup", { row_id: decodeURIComponent(m[1]), hal: b.hal, start: b.start }]],
     ["GET", /^\/api\/solve$/, () => ["solve", {}]],
-    ["POST", /^\/api\/warmup-minutes$/, (m, b) => ["apply_warmup_minutes", { changes: b.changes }]],
+    ["POST", /^\/api\/solution$/, (m, b) => ["apply_solution", { changes: b.changes }]],
     ["POST", /^\/api\/rows\/move$/, (m, b) => ["move_rows", { row_ids: b.ids, hal: b.hal }]],
     ["POST", /^\/api\/rows\/delete$/, (m, b) => ["delete_rows", { row_ids: b.ids }]],
     ["POST", /^\/api\/rows\/team$/, (m, b) => ["add_team", { hal: b.hal, name: b.name }]],
@@ -195,7 +205,11 @@ const Api = (() => {
       const route = ROUTES.find(([m, re]) => m === method && re.test(url));
       if (!route) throw new ApiError(`Ukendt handling: ${method} ${url}`, 400);
       const [name, args] = route[2](url.match(route[1]), body || {});
-      if (name === "solve") return JSON.parse(bridge.solve(planJson));
+      if (name === "solve") {
+        const res = JSON.parse(bridge.solve(planJson));
+        if (!res.ok) throw new ApiError(res.error, res.status);
+        return res.solution;
+      }
       return answer(bridge.call(planJson, name, JSON.stringify(args)), name !== "payload");
     },
     async upload(files, hal) {
@@ -209,7 +223,9 @@ const Api = (() => {
     },
     async exportPlan(name) {
       const out = "/tmp/opvisning_med_opvarmning.xlsx";
-      const { filename } = JSON.parse(bridge.export_to(planJson, out, name || ""));
+      const res = JSON.parse(bridge.export_to(planJson, out, name || ""));
+      if (!res.ok) throw new ApiError(res.error, res.status);
+      const { filename } = res;
       const bytes = py.FS.readFile(out);
       download(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename);
     },

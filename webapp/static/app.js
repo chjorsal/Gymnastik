@@ -807,6 +807,20 @@ async function onSolve() {
   renderSolveResult();
 }
 
+function smallButton(text, className, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `btn btn-sm ${className}`;
+  btn.textContent = text;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+function closeSolveResult() {
+  solveResult = null;
+  renderSolveResult();
+}
+
 function renderSolveResult() {
   const box = document.getElementById("solve-result");
   if (solving) return;   // søgning i gang
@@ -818,51 +832,68 @@ function renderSolveResult() {
   }
   box.classList.remove("hidden");
   box.replaceChildren();
-  const { changes, placed, remaining } = solveResult;
-  const p = document.createElement("p");
-  if (!placed.length) {
-    p.textContent = "Ingen løsning fundet: der er ikke plads, heller ikke med 10 min opvarmning til holdene omkring. "
-      + "Flyt holdet i programmet, eller træk det ind på tidslinjen.";
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "btn btn-sm btn-outline-secondary";
-    close.textContent = "Luk";
-    close.addEventListener("click", () => { solveResult = null; renderSolveResult(); });
-    box.append(p, close);
-    return;
+  const { changes, moves, placed, remaining, hints } = solveResult;
+  const line = (text) => {
+    const p = document.createElement("p");
+    p.textContent = text;
+    box.appendChild(p);
+    return p;
+  };
+
+  if (placed.length) {
+    const total = placed.length + remaining.length;
+    line(`${placed.length} af ${total} hold får plads (${placed.join(", ")}), hvis:`);
+    const ul = document.createElement("ul");
+    const where = (c) => `${c.hold} (går på ${c.opvisningTid} i ${c.opvisningHal})`;
+    moves.forEach((m) => {
+      const li = document.createElement("li");
+      li.textContent = `${where(m)}: varmer op i ${m.toHal}`;
+      ul.appendChild(li);
+    });
+    changes.forEach((c) => {
+      const li = document.createElement("li");
+      li.textContent = `${where(c)}: ${c.from} → ${c.to} min`;
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  } else if (!hints.length) {
+    line("Ingen løsning fundet: der er ikke plads i nogen hal, heller ikke med 10 min opvarmning til holdene omkring. "
+      + "Flyt holdet i programmet, eller træk det ind på tidslinjen.");
   }
-  const total = placed.length + remaining.length;
-  p.textContent = `${placed.length} af ${total} hold får plads (${placed.join(", ")}), `
-    + `hvis ${changes.length} hold får kortere opvarmning:`;
-  const ul = document.createElement("ul");
-  changes.forEach((c) => {
-    const li = document.createElement("li");
-    li.textContent = `${c.hold} (går på ${c.opvisningTid} i ${c.opvisningHal}): ${c.from} → ${c.to} min`;
-    ul.appendChild(li);
+
+  // Hold, du selv har låst til en hal, flyttes aldrig — men du får at vide,
+  // hvor der er plads, og kan selv flytte holdet.
+  hints.forEach((h) => {
+    const p = line(`${h.hold} er låst til ${h.lockedHal}. Der er plads i ${h.freeHal}, hvis du flytter holdet. `);
+    p.className = "solve-hint";
+    p.appendChild(smallButton(`Flyt til ${h.freeHal}`, "btn-outline-secondary", () => {
+      solveResult = null;
+      return patchRow(h.id, "opvarmningHal", h.freeHal);
+    }));
   });
-  box.append(p, ul);
-  if (remaining.length) {
-    const rest = document.createElement("p");
-    rest.textContent = `Stadig uden plads: ${remaining.join(", ")}. Flyt holdet i programmet, eller træk det ind på tidslinjen.`;
-    box.appendChild(rest);
+  const hinted = new Set(hints.map((h) => h.hold));
+  const stuck = remaining.filter((name) => !hinted.has(name));
+  if (placed.length && stuck.length) {
+    line(`Stadig uden plads: ${stuck.join(", ")}. Flyt holdet i programmet, eller træk det ind på tidslinjen.`);
   }
+
   const actionsEl = document.createElement("div");
   actionsEl.className = "solve-actions";
-  const use = document.createElement("button");
-  use.type = "button";
-  use.className = "btn btn-sm btn-primary";
-  use.textContent = "Brug løsningen";
-  use.addEventListener("click", () => {
-    const payloadChanges = changes.map((c) => ({ id: c.id, minutes: c.to }));
-    solveResult = null;
-    return update(apiJSON("/api/warmup-minutes", "POST", { changes: payloadChanges }));
-  });
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.className = "btn btn-sm btn-outline-secondary";
-  cancel.textContent = "Annullér";
-  cancel.addEventListener("click", () => { solveResult = null; renderSolveResult(); });
-  actionsEl.append(use, cancel);
+  if (placed.length) {
+    actionsEl.append(
+      smallButton("Brug løsningen", "btn-primary", () => {
+        const payload = [
+          ...changes.map((c) => ({ id: c.id, minutes: c.to })),
+          ...moves.map((m) => ({ id: m.id, hal: m.toHal })),
+        ];
+        solveResult = null;
+        return update(apiJSON("/api/solution", "POST", { changes: payload }));
+      }),
+      smallButton("Annullér", "btn-outline-secondary", closeSolveResult),
+    );
+  } else {
+    actionsEl.append(smallButton("Luk", "btn-outline-secondary", closeSolveResult));
+  }
   box.appendChild(actionsEl);
 }
 
@@ -1100,6 +1131,7 @@ function buildWarmInput(row, focusPrefix) {
   const warmInput = document.createElement("input");
   warmInput.type = "number";
   warmInput.min = "0";
+  warmInput.max = "40";   // opvarmningen må højst starte 45 min før, og der er 5 min gang
   warmInput.className = "form-control form-control-sm cell-input";
   warmInput.value = row.opvarmningMinOverride ?? row.opvarmningMinDefault;
   warmInput.dataset.focusKey = `${focusPrefix}:${row.id}`;

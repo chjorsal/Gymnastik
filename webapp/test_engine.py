@@ -177,21 +177,22 @@ def run():
         all(s == "OK" for s in df3_plan2["Status"]),
     )
 
-    # two teams with identical show time both needing warmup -> only enough
-    # room for one in a single hall (they will genuinely collide)
+    # two teams 5 min apart, both with 35 min warmup -> only enough room for
+    # one in a single hall (they will genuinely collide). (Warm-up may start
+    # at most 45 min before the show, so 40 min is the longest possible.)
     tight_rows = [
         {"id": "p", "Hold": "P", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
-         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 5, "OpvarmningMinOverride": 60,
+         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 5, "OpvarmningMinOverride": 35,
          "OpvarmningHalOverride": None, "Order": 0},
         {"id": "q", "Hold": "Q", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
-         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 5, "OpvarmningMinOverride": 60,
+         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 5, "OpvarmningMinOverride": 35,
          "OpvarmningHalOverride": None, "Order": 1},
     ]
     df_tight = engine.build_dataframe(tight_rows, show_halls)
     df_tight_plan = engine.compute_plan(df_tight, ["Hal Only"], "Hal Only")
     statuses = set(df_tight_plan["Status"])
     check(
-        "two heavily overlapping 60min-warmup teams in ONE hal -> at least one fails",
+        "two heavily overlapping 35min-warmup teams in ONE hal -> at least one fails",
         "KAN IKKE PLANLÆGGES" in statuses,
         f"statuses={statuses}",
     )
@@ -235,13 +236,13 @@ def run():
     start_pin_row = {
         "id": "sp1", "Hold": "StartPinned", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 10, "OpvarmningMinOverride": 15,
-        "OpvarmningHalOverride": None, "OpvarmningStartOverride": "08:05", "Order": 0,
+        "OpvarmningHalOverride": None, "OpvarmningStartOverride": "08:20", "Order": 0,
     }
     df_sp = engine.build_dataframe([start_pin_row], show_halls)
     df_sp_plan = engine.compute_plan(df_sp, ["Hal A", "Hal B"], "Hal A")
     check(
         "manual start-time override places the team at EXACTLY that time",
-        df_sp_plan.iloc[0]["OpvarmningStart"] == datetime(2000, 1, 1, 8, 5),
+        df_sp_plan.iloc[0]["OpvarmningStart"] == datetime(2000, 1, 1, 8, 20),
         f"got {df_sp_plan.iloc[0]['OpvarmningStart']}",
     )
 
@@ -250,10 +251,10 @@ def run():
     swap_rows = [
         {"id": "swA", "Hold": "SwapA", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
          "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 10, "OpvarmningMinOverride": 15,
-         "OpvarmningHalOverride": "Hal A", "OpvarmningStartOverride": "08:00", "Order": 0},
+         "OpvarmningHalOverride": "Hal A", "OpvarmningStartOverride": "08:20", "Order": 0},
         {"id": "swB", "Hold": "SwapB", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
          "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 10, "OpvarmningMinOverride": 15,
-         "OpvarmningHalOverride": "Hal A", "OpvarmningStartOverride": "08:00", "Order": 1},
+         "OpvarmningHalOverride": "Hal A", "OpvarmningStartOverride": "08:20", "Order": 1},
     ]
     df_swap = engine.build_dataframe(swap_rows, show_halls)
     df_swap_plan = engine.compute_plan(df_swap, ["Hal A", "Hal B"], "Hal A")
@@ -268,10 +269,10 @@ def run():
     # start times (mirrors what the drag-and-drop UI does)
     two_rows = [
         {"id": "t1", "Hold": "Early Team", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
-         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 30, "OpvarmningMinOverride": 15,
+         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 15, "OpvarmningMinOverride": 15,
          "OpvarmningHalOverride": None, "Order": 0},
         {"id": "t2", "Hold": "Later Team", "Type": "hold", "AntalPersoner": 10, "HoldtypeRaw": None,
-         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 30, "OpvarmningMinOverride": 15,
+         "AlderRaw": "voksen", "OpvisningHal": "TestHal", "Varighed": 15, "OpvarmningMinOverride": 15,
          "OpvarmningHalOverride": None, "Order": 1},
     ]
     df_two = engine.build_dataframe(two_rows, show_halls)

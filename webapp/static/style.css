@@ -311,6 +311,7 @@ td.narrow-col, .start-time-input, .hall-time-input, .hall-row-time { font-varian
 .solve-result ul { margin: 0 0 12px; padding-left: 18px; }
 .solve-result li { font-variant-numeric: tabular-nums; }
 .solve-actions { display: flex; gap: 8px; }
+.solve-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-weight: 600; }
 
 /* ---------- Faner ---------- */
 

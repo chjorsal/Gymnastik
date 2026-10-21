@@ -157,7 +157,7 @@ def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFram
     df["OpvisningStart"] = df["OpvisningStart"].astype(object)
     for hal_name, group in df.groupby("OpvisningHal", sort=False):
         t = start_map.get(hal_name, datetime(2000, 1, 1, 9, 0))
-        for idx in group.sort_values("Order").index:
+        for idx in group.sort_values("Order", kind="stable").index:
             df.at[idx, "OpvisningStart"] = t
             t = t + timedelta(minutes=int(df.at[idx, "Varighed"]))
 

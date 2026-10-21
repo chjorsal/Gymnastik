@@ -9,6 +9,9 @@ MAX_EARLY_MIN = 10
 # Et hold må højst være færdigt med opvarmning 25 min før gangtiden, dvs.
 # 30 min før det skal på gulvet. Først prøves 0-10 min, så op til 25.
 MAX_EARLY_TOTAL_MIN = 25
+# Og opvarmningen må højst STARTE 45 min før holdet skal på gulvet. Med 5 min
+# gang kan en opvarmning derfor højst vare 40 min.
+MAX_START_BEFORE_MIN = 45
 
 # Standard opvarmningstider i minutter (bruges når et hold ikke har fået en
 # manuel opvarmningstid sat i UI'en)

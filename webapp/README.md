@@ -85,6 +85,8 @@ python test_api.py           røgtest af serveren (starter sin egen)
 python test_build_site.py    browserudgavens build (kræver internet første gang)
 python test_e2e.py server    browsertest mod serveren   (kræver playwright + Edge)
 python test_e2e.py browser   browsertest mod browserudgaven
+python test_chaos.py [N] [S] kaos-test: N tilfældige brugere x S skridt prøver at ødelægge planen
+python test_monkey.py [N] [S] robot-bruger klikker, skriver og trækker tilfældigt på siden (playwright + Edge)
 ```
 
 Kommandolinje-versionen (`../lav_opvarmning_final.py fil1.xlsx ...`) bruger

@@ -96,7 +96,7 @@ class TeamCreate(BaseModel):
     name: str
 
 
-class WarmupMinutes(BaseModel):
+class Solution(BaseModel):
     changes: List[dict]
 
 
@@ -200,9 +200,9 @@ def solve():
     return actions.solve_warmups(STATE)
 
 
-@app.post("/api/warmup-minutes")
-def apply_warmup_minutes(payload: WarmupMinutes):
-    return run_action(actions.apply_warmup_minutes, payload.changes)
+@app.post("/api/solution")
+def apply_solution(payload: Solution):
+    return run_action(actions.apply_solution, payload.changes)
 
 
 @app.post("/api/rows/reorder")
