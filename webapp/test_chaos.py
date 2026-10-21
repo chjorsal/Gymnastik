@@ -330,8 +330,10 @@ def run(seeds=3, steps=80, start=0):
 
 
 if __name__ == "__main__":
-    seeds, steps = int(sys.argv[1]), int(sys.argv[2])
-    probs = run(seeds, steps)
-    print(f"{seeds} brugere x {steps} skridt: {len(probs)} slags fejl")
+    args = [int(a) for a in sys.argv[1:4]]
+    seeds, steps, start = (args + [3, 80, 0][len(args):])[:3]
+    probs = run(seeds, steps, start)
     for key, (seed, step, log, detail) in probs.items():
         print(f"\n### {key}\n  seed={seed} skridt={step}\n  " + "\n  ".join(log) + f"\n  -> {str(detail)[:600]}")
+    print(f"\n{seeds} brugere x {steps} skridt: {len(probs)} slags fejl")
+    sys.exit(1 if probs else 0)
