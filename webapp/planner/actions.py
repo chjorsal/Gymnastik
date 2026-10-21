@@ -306,7 +306,9 @@ def patch_row(plan: dict, row_id: str, field: str, value=None) -> None:
         row["HoldEdited"] = True
     if key == "OpvisningHal":
         name = str(value or "").strip()
-        if name and _find_show_hal(plan, name) is None:
+        if not name:
+            raise ActionError("Vælg hvilken opvisningshal holdet skal i")
+        if _find_show_hal(plan, name) is None:
             plan["show_halls"].append({"name": name, "startTime": "09:00"})
         if name and name != row["OpvisningHal"]:
             row["Order"] = _next_order(plan, name)
@@ -378,10 +380,15 @@ def add_team(plan: dict, hal: str, name: str) -> None:
 
 
 def reorder_rows(plan: dict, hal: str, ordered_ids: List[str]) -> None:
-    by_id = {r["id"]: r for r in plan["raw_rows"] if r["OpvisningHal"] == hal}
-    for i, rid in enumerate(ordered_ids):
-        if rid in by_id:
-            by_id[rid]["Order"] = i
+    """Ny rækkefølge i en opvisningshal. Id'er fra andre haller og dubletter
+    ignoreres, og punkter der mangler i listen, beholder deres indbyrdes
+    rækkefølge til sidst — så to punkter aldrig får samme plads."""
+    in_hal = sorted((r for r in plan["raw_rows"] if r["OpvisningHal"] == hal), key=lambda r: r["Order"])
+    by_id = {r["id"]: r for r in in_hal}
+    wanted = list(dict.fromkeys(rid for rid in ordered_ids if rid in by_id))
+    rest = [r["id"] for r in in_hal if r["id"] not in set(wanted)]
+    for i, rid in enumerate(wanted + rest):
+        by_id[rid]["Order"] = i
 
 
 def swap_warmup_time(plan: dict, dragged_id: str, target_id: str) -> None:

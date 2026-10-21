@@ -214,6 +214,20 @@ def run():
     actions.patch_row(st, a["id"], "opvarmningMin", 40)
     check("40 min warm-up is allowed", a["OpvarmningMinOverride"] == 40)
 
+    # ---------- fundet af kaos-testen ----------
+    cz = plan_with_halls()
+    actions.upload(cz, [("d.xlsx", excel_bytes(["A", "B", "C", "D"]))], show_hal="Sal A")
+    a, b, c, d = cz["raw_rows"]
+    before = copy.deepcopy(cz)
+    check("moving a team to a blank show hall is refused (the team would vanish)",
+          raises(lambda: actions.patch_row(cz, a["id"], "opvisningHal", "  "), 400) is not None and cz == before)
+    actions.reorder_rows(cz, "Sal A", [d["id"], b["id"], b["id"], "fremmed-id"])
+    orders = [(r["Hold"], r["Order"]) for r in sorted(cz["raw_rows"], key=lambda r: r["Order"])]
+    check("reorder with a partial list: listed first, the rest keep their order, no shared places",
+          orders == [("D", 0), ("B", 1), ("A", 2), ("C", 3)], orders)
+    times = [r["opvisningTid"] for r in sorted(actions.payload(cz)["rows"], key=lambda r: r["order"])]
+    check("show times follow the new order without gaps or doubles", times == ["09:00", "09:10", "09:20", "09:30"], times)
+
     # ---------- omdøb haller: navne skal være unikke ----------
     rp = plan_with_halls()
     actions.upload(rp, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal A")
@@ -642,6 +656,15 @@ def run():
     exp = json.loads(browser.export_to(json.dumps(res["plan"]), out, "Lørdag: Arena"))
     check("bridge export_to returns the cleaned user name", exp["filename"] == "Lørdag Arena.xlsx", exp)
 
+    junk_calls = [("apply_solution", {"changes": "vrøvl"}), ("patch_row", {"row_id": {}, "field": [], "value": 1}),
+                  ("create_warmup_hall", {"name": ["liste"]}), ("move_rows", {"row_ids": 1.5, "hal": "x"}),
+                  ("patch_row", {"ukendt_argument": 1})]
+    answers = [json.loads(browser.call(plan_json, n, json.dumps(a))) for n, a in junk_calls]
+    check("the bridge answers junk with a Danish error instead of crashing",
+          all(r["ok"] is False and r["status"] in (400, 404, 500) and r["error"] for r in answers), answers)
+    sol = json.loads(browser.solve(plan_json))
+    check("bridge solve returns ok + solution", sol["ok"] and set(sol["solution"]) >= {"changes", "moves", "placed"}, sol)
+    check("bridge solve on a broken plan gives an error, not a crash", json.loads(browser.solve("{ødelagt"))["ok"] is False)
     res = json.loads(browser.import_plan("ikke json"))
     check("bridge import_plan rejects bad file", res == {"ok": False, "error": "Filen er ikke en gyldig plan.", "status": 400})
     res = json.loads(browser.import_plan(plan_json))
