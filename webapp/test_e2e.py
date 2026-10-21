@@ -351,6 +351,57 @@ def add_from_menu(page, item):
     page.click(item)
 
 
+def solve_hall_tests(page, tmp):
+    """Find løsning flytter frie hold til en anden hal og giver tip om låste hold."""
+    api(page, "POST", "/api/reset")
+    for hal in ("Varm 1", "Varm 2"):
+        api(page, "POST", "/api/halls/warmup", {"name": hal})
+    for sal, start in (("Sal A", "10:00"), ("Sal B", "10:10"), ("Sal C", "10:20")):
+        api(page, "POST", "/api/halls/show", {"name": sal})
+        api(page, "POST", "/api/halls/show/starttime", {"name": sal, "startTime": start})
+    refresh(page)
+    for sal, team in (("Sal A", "A"), ("Sal B", "L"), ("Sal C", "P")):
+        path = Path(tmp) / f"{team}.xlsx"
+        path.write_bytes(excel_bytes([team]))
+        page.evaluate("(h) => { uploadTarget = h; fileHandler = null; }", sal)
+        page.set_input_files("#file-input", str(path))
+        page.wait_for_function(f"() => STATE.rows.some(r => r.hold === '{team}')")
+    rid = lambda team: page.evaluate(f"() => STATE.rows.find(r => r.hold === '{team}').id")
+    # P får fast tid først (mens der er plads), og bliver så længere
+    api(page, "POST", f"/api/rows/{rid('P')}/place", {"hal": "Varm 2", "start": "09:20"})
+    for team, minutes in (("A", 30), ("L", 30), ("P", 50)):
+        api(page, "PATCH", f"/api/rows/{rid(team)}", {"field": "opvarmningMin", "value": minutes})
+    refresh(page)
+    page.click(".rail-link[data-view=oversigt]")
+    page.click("#problem-banner")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    text = page.inner_text("#solve-result")
+    check("Find løsning foreslår en anden hal i stedet for kortere opvarmning",
+          "L (går på 10:10 i Sal B): varmer op i Varm 1" in text and "→" not in text, text)
+    page.click("#solve-result >> text=Brug løsningen")
+    page.wait_for_function("() => STATE.rows.every(r => r.status === 'OK')")
+    check("Brug løsningen lægger holdet i den foreslåede hal",
+          page.evaluate("() => STATE.rows.find(r => r.hold === 'L').opvarmningHalOverride") == "Varm 1")
+
+    # Låst hold uden plads: tip og knap, men ingen automatisk flytning
+    api(page, "PATCH", f"/api/rows/{rid('L')}", {"field": "opvarmningHal", "value": "Varm 2"})
+    refresh(page)
+    page.click("#problem-banner")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    text = page.inner_text("#solve-result")
+    check("et låst hold flyttes ikke, men der står hvor der er plads",
+          "L er låst til Varm 2. Der er plads i Varm 1" in text and "Brug løsningen" not in text, text)
+    page.click("#solve-result >> text=Flyt til Varm 1")
+    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'L').status === 'OK'")
+    check("knappen i tippet flytter holdet", page.evaluate(
+        "() => STATE.rows.find(r => r.hold === 'L').opvarmningHalOverride") == "Varm 1")
+    # ryd op: de næste tests opretter selv Sal B og Sal C uden fast starttid
+    for sal in ("Sal B", "Sal C"):
+        api(page, "DELETE", "/api/halls/show", {"name": sal})
+    api(page, "DELETE", "/api/halls/warmup", {"name": "Varm 2"})
+    refresh(page)
+
+
 def drop_files(page, selector, files):
     """Slipper filer fra 'computeren' på elementet. files: [(navn, bytes)]."""
     import base64
@@ -602,6 +653,7 @@ def run(mode):
             ux_tests(page)
             bulk_tests(page, dialogs)
             solve_tests(page, tmp)
+            solve_hall_tests(page, tmp)
             drop_tests(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))

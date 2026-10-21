@@ -413,7 +413,8 @@ def run():
     check("solve changes each team by at most 5 min", all(c["from"] - c["to"] <= 5 for c in sol["changes"]), sol["changes"])
     ok_before = {r["hold"] for r in actions.payload(plan_s2)["rows"] if r["status"] == "OK"}
     applied = copy.deepcopy(plan_s2)
-    actions.apply_warmup_minutes(applied, [{"id": c["id"], "minutes": c["to"]} for c in sol["changes"]])
+    actions.apply_solution(applied, [{"id": c["id"], "minutes": c["to"]} for c in sol["changes"]]
+                           + [{"id": m["id"], "hal": m["toHal"]} for m in sol["moves"]])
     view = {r["hold"]: r for r in actions.payload(applied)["rows"]}
     check("applying the solution places exactly the promised teams",
           {h for h in missing if view[h]["status"] == "OK"} == set(sol["placed"]), (sol["placed"], sol["remaining"]))
@@ -437,12 +438,66 @@ def run():
                                                          ("DGI MiniMix", 12), ("D", 12)]))], show_hal="Sal")
     sol_d = actions.solve_warmups(plan_dgi)
     check("DGI teams are never shortened by solve", all("DGI" not in c["hold"] for c in sol_d["changes"]), sol_d["changes"])
-    check("apply_warmup_minutes rejects unknown team", raises(lambda: actions.apply_warmup_minutes(
+    check("apply_solution rejects unknown team", raises(lambda: actions.apply_solution(
         plan_eft, [{"id": "x", "minutes": 12}]), 404) is not None)
-    check("apply_warmup_minutes rejects < 1 min", raises(lambda: actions.apply_warmup_minutes(
+    check("apply_solution rejects < 1 min", raises(lambda: actions.apply_solution(
         plan_eft, [{"id": plan_eft["raw_rows"][1]["id"], "minutes": 0}]), 400) is not None)
+    before = copy.deepcopy(plan_eft)
+    check("apply_solution rejects an unknown hall and changes nothing", raises(lambda: actions.apply_solution(
+        plan_eft, [{"id": plan_eft["raw_rows"][1]["id"], "minutes": 12},
+                   {"id": plan_eft["raw_rows"][2]["id"], "hal": "Findes ikke"}]), 400) is not None and plan_eft == before)
     check("solve with nothing to solve returns empty", actions.solve_warmups(actions.new_plan())
-          == {"changes": [], "placed": [], "remaining": []})
+          == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": []})
+
+    # ---------- Find løsning prøver også andre haller ----------
+    # A går på kl. 10 og tager V1. L går på 10:10, men V2 er optaget af P
+    # (fast tid 09:20–10:10), så L står uden plads. Får L pladsen i V1 først,
+    # kan A bare varme op lidt tidligere i V1 — ingen kortere opvarmning.
+    mv = actions.new_plan()
+    for hal in ("V1", "V2"):
+        actions.create_warmup_hall(mv, hal)
+    for sal, team, start in (("S1", "A", "10:00"), ("S2", "L", "10:10"), ("S3", "P", "10:20")):
+        actions.create_show_hall(mv, sal)
+        actions.set_show_hall_start_time(mv, sal, start)
+        actions.upload(mv, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    for r in mv["raw_rows"]:
+        r["OpvarmningMinOverride"] = {"A": 30, "L": 30, "P": 50}[r["Hold"]]
+        if r["Hold"] == "P":
+            r["OpvarmningHalOverride"], r["OpvarmningStartOverride"] = "V2", "09:20"
+    missing = [r["hold"] for r in actions.payload(mv)["rows"] if r["status"] != "OK"]
+    check("scenario: L has no room", missing == ["L"], missing)
+    before = copy.deepcopy(mv)
+    sol = actions.solve_warmups(mv)
+    check("solve finds room by giving L a hall first, with no shorter warm-ups",
+          sol["placed"] == ["L"] and sol["changes"] == [] and [(m["hold"], m["toHal"]) for m in sol["moves"]] == [("L", "V1")],
+          sol)
+    check("solve with moves does not change the plan", mv == before)
+    actions.apply_solution(mv, [{"id": m["id"], "hal": m["toHal"]} for m in sol["moves"]])
+    check("applying the move gives every team room", all(r["status"] == "OK" for r in actions.payload(mv)["rows"]))
+
+    # Et hold, brugeren selv har låst til en hal, flyttes aldrig — men der
+    # kommer et tip, hvis der er plads i en anden hal.
+    hl = actions.new_plan()
+    for hal in ("V1", "V2"):
+        actions.create_warmup_hall(hl, hal)
+    for sal, team, start in (("S1", "A", "10:00"), ("S2", "L", "10:00")):
+        actions.create_show_hall(hl, sal)
+        actions.set_show_hall_start_time(hl, sal, start)
+        actions.upload(hl, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    ids = {r["Hold"]: r["id"] for r in hl["raw_rows"]}
+    actions.place_warmup(hl, ids["A"], "V1", "09:40")          # A fast i V1 09:40–09:55
+    actions.patch_row(hl, ids["L"], "opvarmningHal", "V1")      # L låst til V1, hvor der ikke er plads
+    for r in hl["raw_rows"]:
+        if r["Hold"] == "A":
+            r["OpvarmningStartOverride"] = "09:10"              # A optager hele L's vindue
+            r["OpvarmningMinOverride"] = 45
+    views = {r["hold"]: r for r in actions.payload(hl)["rows"]}
+    check("scenario: locked L has no room in V1", views["L"]["status"] != "OK", views["L"])
+    sol = actions.solve_warmups(hl)
+    check("solve never moves a team the user locked to a hall",
+          all(m["hold"] != "L" for m in sol["moves"]) and "L" in sol["remaining"], sol)
+    check("solve tells where a locked team would have room",
+          [(h["hold"], h["lockedHal"], h["freeHal"]) for h in sol["hints"]] == [("L", "V1", "V2")], sol["hints"])
 
     # ---------- bytte opvarmningstid ----------
     check("swap with unknown team -> 404",
