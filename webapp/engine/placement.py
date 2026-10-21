@@ -187,11 +187,21 @@ def compute_plan(
             placed = try_place(*args, MAX_EARLY_TOTAL_MIN)
         return _book(bookings, r["Hold"], placed)
 
+    def slack(r) -> int:
+        """Hvor mange minutter opvarmningen kan flyttes frem: højst 25, og
+        mindre for lange opvarmninger (de må starte højst 45 min før)."""
+        return min(MAX_EARLY_TOTAL_MIN, MAX_START_BEFORE_MIN - gang_tid() - warm_min_for(r))
+
     # PASS 1: hold som brugeren har låst til én hal (uden fast tidspunkt).
     # De kan kun være dér, så de får deres plads, før hold der kan varme op
     # hvor som helst — ellers kan et frit hold tage den sidste plads i hallen.
+    # De mindst fleksible først (fx efterskoler med 30 min, som kun kan flytte
+    # sig 10 min), så et låst hold med 15 min ikke tager deres eneste hul.
     has_hal_override = df_plan.apply(lambda r: hal_override_for(r) is not None, axis=1)
-    hal_locked = df_plan[has_hal_override & ~has_start_override].sort_values("OpvisningStart")
+    hal_locked = df_plan[has_hal_override & ~has_start_override].copy()
+    hal_locked["_slack"] = hal_locked.apply(slack, axis=1)
+    hal_locked["_not_eft"] = hal_locked["Holdtype"] != "efterskole"   # lige fleksible: efterskolen først
+    hal_locked = hal_locked.sort_values(["_slack", "_not_eft", "OpvisningStart"], kind="stable")
     for _, r in hal_locked.iterrows():
         first = MAX_EARLY_TOTAL_MIN if r["Holdtype"] == "efterskole" else MAX_EARLY_MIN
         results[r["id"]] = place_in_window(r, [hal_override_for(r)], first)

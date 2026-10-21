@@ -231,7 +231,19 @@ def random_step(rng, plan, log):
         if plan != before:
             raise AssertionError("solve_warmups ændrede planen")
         json.dumps(s)
-        log.append(f"solve placed={len(s['placed'])} changes={len(s['changes'])} moves={len(s['moves'])}")
+        log.append(f"solve placed={len(s['placed'])} changes={len(s['changes'])} moves={len(s['moves'])} "
+                   f"program={len(s['programMoves'])}")
+        if s["programMoves"] and rng.random() < 0.5:
+            m = rng.choice(s["programMoves"])
+            v0 = A._views(plan)
+            A.reorder_rows(plan, m["opvisningHal"], m["orderedIds"])
+            v1 = A._views(plan)
+            if v1[m["id"]]["status"] != "OK" or not A._ok_ids(v0) <= A._ok_ids(v1):
+                raise AssertionError("forslaget om at flytte i programmet gav ikke plads eller skubbede hold ud")
+            if any((v0[i]["opvisningMin"] >= 780) != (v1[i]["opvisningMin"] >= 780)
+                   for i in v0 if v0[i]["opvisningMin"] is not None):
+                raise AssertionError("forslaget om at flytte i programmet flyttede et hold over kl. 13")
+            return
         if rng.random() < 0.8:
             v0 = A._views(plan)
             ok_before = A._ok_ids(v0)

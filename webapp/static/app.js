@@ -832,7 +832,7 @@ function renderSolveResult() {
   }
   box.classList.remove("hidden");
   box.replaceChildren();
-  const { changes, moves, placed, remaining, hints } = solveResult;
+  const { changes, moves, placed, remaining, hints, programMoves } = solveResult;
   const line = (text) => {
     const p = document.createElement("p");
     p.textContent = text;
@@ -856,7 +856,7 @@ function renderSolveResult() {
       ul.appendChild(li);
     });
     box.appendChild(ul);
-  } else if (!hints.length) {
+  } else if (!hints.length && !programMoves.length) {
     line("Ingen løsning fundet: der er ikke plads i nogen hal, heller ikke med 10 min opvarmning til holdene omkring. "
       + "Flyt holdet i programmet, eller træk det ind på tidslinjen.");
   }
@@ -871,7 +871,22 @@ function renderSolveResult() {
       return patchRow(h.id, "opvarmningHal", h.freeHal);
     }));
   });
-  const hinted = new Set(hints.map((h) => h.hold));
+  // Ligger holdet for tæt på et andet i programmet: foreslå et andet
+  // tidspunkt (samme side af kl. 13). Programmet ændres kun, hvis du klikker.
+  programMoves.forEach((m) => {
+    const why = m.crowdedBy && m.warmupHal
+      ? `${m.hold} går på for tæt på ${m.crowdedBy} til, at begge kan varme op i ${m.warmupHal}.`
+      : `Der er ikke plads til ${m.hold}s opvarmning omkring kl. ${m.fromTid}.`;
+    const where = m.after ? `efter ${m.after}` : `først i ${m.opvisningHal}`;
+    const p = line(`${why} Forslag: flyt holdet i programmet fra ${m.fromTid} til ${m.toTid} (${where}). `);
+    p.className = "solve-hint";
+    p.appendChild(smallButton("Flyt i programmet", "btn-outline-secondary", async () => {
+      solveResult = null;
+      await update(apiJSON("/api/rows/reorder", "POST", { hal: m.opvisningHal, orderedIds: m.orderedIds }));
+      onSolve();   // regn forfra med det nye program
+    }));
+  });
+  const hinted = new Set([...hints.map((h) => h.hold), ...programMoves.map((m) => m.hold)]);
   const stuck = remaining.filter((name) => !hinted.has(name));
   if (placed.length && stuck.length) {
     line(`Stadig uden plads: ${stuck.join(", ")}. Flyt holdet i programmet, eller træk det ind på tidslinjen.`);
