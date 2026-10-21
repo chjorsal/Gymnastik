@@ -186,6 +186,34 @@ def run():
     views = {r["hold"]: r for r in actions.payload(lk)["rows"]}
     check("without the lock both teams still get room", all(v["status"] == "OK" for v in views.values()))
 
+    # ---------- opvarmningen starter højst 45 min før holdet går på ----------
+    # Efterskolen E (går på 09:30) placeres først og tager V1 08:55–09:25. X
+    # går på 09:20 med 30 min opvarmning; uden grænsen ville X få 08:25–08:55,
+    # dvs. starte 55 min før.
+    st = actions.new_plan()
+    actions.create_warmup_hall(st, "V1")
+    for sal, team, start in (("S1", "Testby Efterskole", "09:30"), ("S2", "X", "09:20")):
+        actions.create_show_hall(st, sal)
+        actions.set_show_hall_start_time(st, sal, start)
+        actions.upload(st, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    for r in st["raw_rows"]:
+        r["OpvarmningMinOverride"] = 30
+    rows = {r["hold"]: r for r in actions.payload(st)["rows"]}
+    check("no warm-up starts more than 45 min before the team is on the floor",
+          rows["X"]["status"] != "OK" or rows["X"]["opvisningMin"] - rows["X"]["opvarmningStartMin"] <= 45,
+          (rows["X"]["status"], rows["X"]["opvarmningStart"]))
+    check("the efterskole keeps its slot", rows["Testby Efterskole"]["status"] == "OK")
+    actions.create_warmup_hall(st, "V2")
+    a = next(r for r in st["raw_rows"] if r["Hold"] == "X")       # X går på 09:20
+    err = raises(lambda: actions.place_warmup(st, a["id"], "V2", "08:30"), 400)
+    check("a fixed time more than 45 min before the show is refused", err is not None and "45 min" in err.message,
+          err and err.message)
+    check("warm-up minutes above 40 are refused (45 min minus 5 min walk)",
+          raises(lambda: actions.patch_row(st, a["id"], "opvarmningMin", 41), 400) is not None
+          and a["OpvarmningMinOverride"] == 30)
+    actions.patch_row(st, a["id"], "opvarmningMin", 40)
+    check("40 min warm-up is allowed", a["OpvarmningMinOverride"] == 40)
+
     # ---------- omdøb haller: navne skal være unikke ----------
     rp = plan_with_halls()
     actions.upload(rp, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal A")
@@ -336,9 +364,9 @@ def run():
     check("a pause cannot be given a warm-up", err is not None and "Kun hold" in err.message, err and err.message)
     check("place_warmup rejects 24:00", raises(lambda: actions.place_warmup(plan_e, plan_e["raw_rows"][0]["id"], "V1", "24:00"), 400) is not None)
     a_id = plan_e["raw_rows"][0]["id"]
-    actions.place_warmup(plan_e, a_id, "V1", "08:00")
+    actions.place_warmup(plan_e, a_id, "V1", "08:20")
     va = {r["id"]: r for r in actions.payload(plan_e)["rows"]}[a_id]
-    check("an already placed team can be moved to a free slot", (va["opvarmningStart"], va["status"]) == ("08:00", "OK"), va)
+    check("an already placed team can be moved to a free slot", (va["opvarmningStart"], va["status"]) == ("08:20", "OK"), va)
 
     plan_n = actions.new_plan()
     actions.create_show_hall(plan_n, "Sal")
@@ -450,20 +478,20 @@ def run():
           == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": []})
 
     # ---------- Find løsning prøver også andre haller ----------
-    # A går på kl. 10 og tager V1. L går på 10:10, men V2 er optaget af P
-    # (fast tid 09:20–10:10), så L står uden plads. Får L pladsen i V1 først,
-    # kan A bare varme op lidt tidligere i V1 — ingen kortere opvarmning.
+    # A går på kl. 10 og tager V1 09:40–09:55. L går på 10:10, men V2 er
+    # optaget af P (fast tid 09:30–10:10), så L står uden plads. Får L pladsen
+    # i V1 først, kan A bare varme op lidt tidligere — ingen kortere opvarmning.
     mv = actions.new_plan()
     for hal in ("V1", "V2"):
         actions.create_warmup_hall(mv, hal)
-    for sal, team, start in (("S1", "A", "10:00"), ("S2", "L", "10:10"), ("S3", "P", "10:20")):
+    for sal, team, start in (("S1", "A", "10:00"), ("S2", "L", "10:10"), ("S3", "P", "10:15")):
         actions.create_show_hall(mv, sal)
         actions.set_show_hall_start_time(mv, sal, start)
         actions.upload(mv, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
     for r in mv["raw_rows"]:
-        r["OpvarmningMinOverride"] = {"A": 30, "L": 30, "P": 50}[r["Hold"]]
+        r["OpvarmningMinOverride"] = {"A": 15, "L": 30, "P": 40}[r["Hold"]]
         if r["Hold"] == "P":
-            r["OpvarmningHalOverride"], r["OpvarmningStartOverride"] = "V2", "09:20"
+            r["OpvarmningHalOverride"], r["OpvarmningStartOverride"] = "V2", "09:30"
     missing = [r["hold"] for r in actions.payload(mv)["rows"] if r["status"] != "OK"]
     check("scenario: L has no room", missing == ["L"], missing)
     before = copy.deepcopy(mv)
@@ -489,8 +517,8 @@ def run():
     actions.patch_row(hl, ids["L"], "opvarmningHal", "V1")      # L låst til V1, hvor der ikke er plads
     for r in hl["raw_rows"]:
         if r["Hold"] == "A":
-            r["OpvarmningStartOverride"] = "09:10"              # A optager hele L's vindue
-            r["OpvarmningMinOverride"] = 45
+            r["OpvarmningStartOverride"] = "09:15"              # A optager hele L's vindue
+            r["OpvarmningMinOverride"] = 40
     views = {r["hold"]: r for r in actions.payload(hl)["rows"]}
     check("scenario: locked L has no room in V1", views["L"]["status"] != "OK", views["L"])
     sol = actions.solve_warmups(hl)

@@ -6,7 +6,9 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from .config import MAX_EARLY_MIN, MAX_EARLY_TOTAL_MIN, SKIFTE_I_SLOTTET_MIN, SKIFTE_MIN, STEP_MIN
+from .config import (
+    MAX_EARLY_MIN, MAX_EARLY_TOTAL_MIN, MAX_START_BEFORE_MIN, SKIFTE_I_SLOTTET_MIN, SKIFTE_MIN, STEP_MIN,
+)
 from .rules import gang_tid, opvarmning_minutter, priority_rank
 from .values import override_int, override_str, parse_clock
 
@@ -65,11 +67,14 @@ def try_place(
 ) -> Optional[Tuple[str, datetime, datetime]]:
     gap = timedelta(minutes=SKIFTE_MIN)
     latest_end = show_start - timedelta(minutes=buffer_min)
+    earliest_start = show_start - timedelta(minutes=MAX_START_BEFORE_MIN)
     dur = timedelta(minutes=warm_min + skifte_i_slot)
 
     for offset in range(0, max_early + 1, STEP_MIN):
         warm_end = latest_end - timedelta(minutes=offset)
         warm_start = warm_end - dur
+        if warm_start < earliest_start:
+            break   # tidligere end dette må opvarmningen ikke starte
         h = _first_free_hall(bookings, halls, warm_start, warm_end, gap)
         if h:
             return h, warm_start, warm_end
@@ -168,7 +173,8 @@ def compute_plan(
         # (fx efter en senere omrokering af programmet) er ugyldigt — vis det
         # som et problem i stedet for stille at melde "OK".
         latest_end = r["OpvisningStart"] - timedelta(minutes=gang_tid())
-        if placed and placed[2] > latest_end:
+        earliest_start = r["OpvisningStart"] - timedelta(minutes=MAX_START_BEFORE_MIN)
+        if placed and (placed[2] > latest_end or placed[1] < earliest_start):
             placed = None
         results[rid] = _book(bookings, r["Hold"], placed)
 

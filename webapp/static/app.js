@@ -1131,6 +1131,7 @@ function buildWarmInput(row, focusPrefix) {
   const warmInput = document.createElement("input");
   warmInput.type = "number";
   warmInput.min = "0";
+  warmInput.max = "40";   // opvarmningen må højst starte 45 min før, og der er 5 min gang
   warmInput.className = "form-control form-control-sm cell-input";
   warmInput.value = row.opvarmningMinOverride ?? row.opvarmningMinDefault;
   warmInput.dataset.focusKey = `${focusPrefix}:${row.id}`;

@@ -36,6 +36,10 @@ EDITABLE_FIELD_MAP = {
 
 INVALID_PLAN = "Filen er ikke en gyldig plan."
 
+# Længste opvarmning: den må starte højst 45 min før holdet går på og skal
+# slutte, så der er 5 min til at gå over.
+MAX_WARMUP_MINUTES = engine.MAX_START_BEFORE_MIN - engine.GANG_MIN
+
 # En ny plan starter med én opvisningshal, så man kan trække Excel-filen
 # direkte ind på den. Navnet kan rettes bagefter.
 DEFAULT_SHOW_HALL = "Hal 1"
@@ -291,6 +295,10 @@ def patch_row(plan: dict, row_id: str, field: str, value=None) -> None:
                 value = int(value)
             except (TypeError, ValueError):
                 value = None
+        if value is not None and value > MAX_WARMUP_MINUTES:
+            raise ActionError(f"Opvarmningen kan højst vare {MAX_WARMUP_MINUTES} min — den må starte højst "
+                              f"{engine.MAX_START_BEFORE_MIN} min før holdet går på, og der skal være "
+                              f"{engine.GANG_MIN} min til at gå over")
     if key == "Hold":
         if row.get("Type") == "hold" and not row.get("Manual"):
             raise ActionError("Holdnavn fra Excel-importen kan ikke ændres")
@@ -431,8 +439,9 @@ def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
     if after[row_id]["status"] != "OK" or not ok_before <= _ok_ids(after):
         row["OpvarmningHalOverride"], row["OpvarmningStartOverride"] = before
         raise ActionError(
-            f"Der er ikke plads til '{row['Hold']}' i {hal} kl. {start_n} — tiden overlapper "
-            "et andet hold, eller holdet når ikke sin opvisning"
+            f"Der er ikke plads til '{row['Hold']}' i {hal} kl. {start_n} — tiden overlapper et andet "
+            f"hold, holdet når ikke sin opvisning, eller opvarmningen starter mere end "
+            f"{engine.MAX_START_BEFORE_MIN} min før holdet går på"
         )
 
 
