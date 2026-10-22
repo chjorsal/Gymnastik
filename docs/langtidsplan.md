@@ -31,9 +31,18 @@ Hver fase skal virke og være taget i brug, før den næste begynder.
 - Saml feedback fra dem, der skal bruge den.
 - Mål: at planlæggeren bliver brugt til et rigtigt stævne.
 
-### Fase 1 — Klar til flere brugere
+### Fase 1 — Klar til, at andre bruger den (hver for sig)
+
+Andre arrangører og foreninger kan bruge siden til rigtige stævner, hver i sin
+egen browser. Ikke samarbejde i samme plan på samme tid — det er fase 2.
 
 - Små forbedringer fra testen.
+- Påmindelse om at gemme planen, så den ikke går tabt, hvis browserdata ryddes.
+- En eksempelfil og en kort vejledning på én side.
+- Et sted at melde fejl og ønsker.
+- Test på iPad (Safari) og ældre bærbare.
+- "Nyt i denne version", når siden opdateres.
+- Ét rigtigt stævne som prøve, før flere får den.
 - "Om data"-teksten opdateres: at kommentarerne kommer med i "Hent plan" og
   "Gem plan", og at GitHub Pages kan registrere IP-adresser.
 - Deling sker som i dag: man gemmer planen og deler filen i OneDrive.
