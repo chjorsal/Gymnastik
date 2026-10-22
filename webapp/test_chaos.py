@@ -253,7 +253,8 @@ def random_step(rng, plan, log):
             ok_before = A._ok_ids(v0)
             unplaced_before = {i for i, v in v0.items() if v["needsWarmup"] and v["status"] == "KAN IKKE PLANLÆGGES"}
             A.apply_solution(plan, [{"id": c["id"], "minutes": c["to"]} for c in s["changes"]]
-                             + [{"id": m["id"], "hal": m["toHal"]} for m in s["moves"]])
+                             + [{"id": m["id"], "hal": m["toHal"]} for m in s["moves"]]
+                             + [{"id": e["id"], "hal": e["hal"], "start": e["start"]} for e in s["earlier"]])
             views = A._views(plan)
             ok_after = A._ok_ids(views)
             lost = ok_before - ok_after

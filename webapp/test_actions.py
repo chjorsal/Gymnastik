@@ -277,6 +277,36 @@ def run():
     check("'Tak for i dag', 'Afslutning' and 'Præmieoverrækkelse' need no warm-up",
           [actions.engine.classify_type(x) for x in ("Tak for i dag", "Afslutning", "Præmieoverrækkelse")] == ["andet"] * 3)
 
+    # ---------- ryk et andet holds opvarmning tidligere ----------
+    # Som Brejninggaard (25 min, går på 11:06) og Vesterbølle (30 min, går på
+    # 11:30), begge i efterskolernes hal. Brejninggaard lægges så sent som
+    # muligt (10:36–11:01), så Vesterbølle ikke kan nå 10:45–10:55. Rykkes
+    # Brejninggaard til 10:30–10:55, er der plads til begge.
+    en = actions.new_plan()
+    actions.create_warmup_hall(en, "Hal 4")
+    actions.create_warmup_hall(en, "Hal 3 A")
+    for sal, team, start in (("Arena", "Brejninggaard Efterskole", "11:06"), ("Hal 2", "Vesterbølle Efterskole", "11:30")):
+        actions.create_show_hall(en, sal)
+        actions.set_show_hall_start_time(en, sal, start)
+        actions.upload(en, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    ids = {r["Hold"]: r["id"] for r in en["raw_rows"]}
+    actions.patch_row(en, ids["Brejninggaard Efterskole"], "opvarmningMin", 25)
+    views = {r["hold"]: r for r in actions.payload(en)["rows"]}
+    check("scenario: Vesterbølle has no room behind Brejninggaard",
+          views["Vesterbølle Efterskole"]["status"] != "OK" and views["Brejninggaard Efterskole"]["opvarmningStart"] == "10:36")
+    sol = actions.solve_warmups(en)
+    check("solve moves Brejninggaard's warm-up earlier instead of shortening anyone",
+          sol["placed"] == ["Vesterbølle Efterskole"] and sol["changes"] == [] and sol["moves"] == []
+          and [(e["hold"], e["fromStart"], e["toStart"], e["toEnd"]) for e in sol["earlier"]]
+          == [("Brejninggaard Efterskole", "10:36", "10:30", "10:55")], sol)
+    actions.apply_solution(en, [{"id": e["id"], "hal": e["hal"], "start": e["start"]} for e in sol["earlier"]])
+    views = {r["hold"]: r for r in actions.payload(en)["rows"]}
+    check("applying it gives both efterskoler room in Hal 4, within the rules",
+          all(v["status"] == "OK" and v["opvarmningHalBeregnet"] == "Hal 4" for v in views.values())
+          and views["Vesterbølle Efterskole"]["opvarmningStart"] == "10:55", views)
+    check("apply_solution rejects a bad start time",
+          raises(lambda: actions.apply_solution(en, [{"id": ids["Brejninggaard Efterskole"], "start": "kl. 25"}]), 400) is not None)
+
     # ---------- for tæt i programmet: forslag om at flytte holdet ----------
     # To efterskoler låst til V1, begge med 30 min: A går på 14:00, B 14:10 —
     # for tæt til at begge kan varme op i V1. B kan flyttes i Sal 2 til 14:30.
@@ -582,7 +612,7 @@ def run():
         plan_eft, [{"id": plan_eft["raw_rows"][1]["id"], "minutes": 12},
                    {"id": plan_eft["raw_rows"][2]["id"], "hal": "Findes ikke"}]), 400) is not None and plan_eft == before)
     check("solve with nothing to solve returns empty", actions.solve_warmups(actions.new_plan())
-          == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": [], "programMoves": [], "crowded": []})
+          == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": [], "programMoves": [], "crowded": [], "earlier": []})
 
     # ---------- Find løsning prøver også andre haller ----------
     # A går på kl. 10 og tager V1 09:40–09:55. L går på 10:10, men V2 er

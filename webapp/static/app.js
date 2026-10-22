@@ -837,7 +837,7 @@ function renderSolveResult() {
   }
   box.classList.remove("hidden");
   box.replaceChildren();
-  const { changes, moves, placed, remaining, hints, programMoves, crowded } = solveResult;
+  const { changes, moves, earlier, placed, remaining, hints, programMoves, crowded } = solveResult;
   const line = (text) => {
     const p = document.createElement("p");
     p.textContent = text;
@@ -853,6 +853,11 @@ function renderSolveResult() {
     moves.forEach((m) => {
       const li = document.createElement("li");
       li.textContent = `${where(m)}: varmer op i ${m.toHal}`;
+      ul.appendChild(li);
+    });
+    earlier.forEach((e) => {
+      const li = document.createElement("li");
+      li.textContent = `${where(e)}: varmer op ${e.toStart}–${e.toEnd} i stedet for ${e.fromStart}–${e.fromEnd}`;
       ul.appendChild(li);
     });
     changes.forEach((c) => {
@@ -912,6 +917,7 @@ function renderSolveResult() {
         const payload = [
           ...changes.map((c) => ({ id: c.id, minutes: c.to })),
           ...moves.map((m) => ({ id: m.id, hal: m.toHal })),
+          ...earlier.map((e) => ({ id: e.id, hal: e.hal, start: e.start })),
         ];
         solveResult = null;
         return update(apiJSON("/api/solution", "POST", { changes: payload }));
