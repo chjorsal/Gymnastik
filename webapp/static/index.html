@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=53">
+<link rel="stylesheet" href="style.css?v=55">
 </head>
 <body>
 <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -319,6 +319,24 @@
   </div>
 </div>
 
+<!-- ===== Holdets kommentar fra Excel ===== -->
+<div class="modal" id="comment-dialog" tabindex="-1" aria-labelledby="comment-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="comment-title" class="modal-title"></h2>
+          <p id="comment-meta" class="comment-meta"></p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Luk"></button>
+      </div>
+      <div class="modal-body">
+        <p id="comment-text" class="comment-text"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ===== Hent plan: vælg filnavn ===== -->
 <div class="modal" id="export-dialog" tabindex="-1" aria-labelledby="export-title" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -348,6 +366,6 @@
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
 <script src="api.js?v=12"></script>
-<script src="app.js?v=58"></script>
+<script src="app.js?v=59"></script>
 </body>
 </html>

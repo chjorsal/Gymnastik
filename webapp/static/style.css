@@ -383,6 +383,13 @@ td.warmup-time-col { width: 150px; white-space: nowrap; }
 .warmup-start-input { width: 70px !important; min-width: 70px; text-align: center; }
 .warmup-end { color: var(--ink); }
 .tl-block[draggable="true"] { cursor: grab; }
+
+/* 💬 kommentaren fra Excel */
+.comment-btn { color: #c45500; background: var(--accent-soft); margin-left: 6px; vertical-align: middle; min-width: 30px; min-height: 30px; padding: 6px; }
+.comment-btn svg { width: 18px; height: 18px; }
+.comment-btn:hover { color: #c45500; background: var(--accent-soft); }
+.comment-meta { margin: 2px 0 0; color: var(--slate); font-size: 14px; }
+.comment-text { margin: 0; white-space: pre-wrap; line-height: 1.55; font-size: 16px; }
 td.warmup-missing { color: var(--signal); font-weight: 700; }
 
 /* Træk-og-slip: rækken løfter sig, og en orange streg viser, hvor den lander. */

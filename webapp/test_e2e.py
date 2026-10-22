@@ -505,6 +505,32 @@ def earlier_tests(page, tmp, dialogs):
     refresh(page)
 
 
+def comment_tests(page, tmp):
+    """💬 ved hold med en kommentar i Excel; klik åbner kommentaren."""
+    api(page, "POST", "/api/reset")
+    refresh(page)
+    df = pd.DataFrame({"Tid": ["09:00", ""], "Varighed": [10, 10], "Holdnavn": ["Med ønske", "Uden"],
+                       "Kommentar": ["<b>Gerne</b> inden kl. 14\nGengangere", None]})
+    path = Path(tmp) / "kommentar.xlsx"
+    df.to_excel(path, index=False)
+    page.evaluate("() => { uploadTarget = STATE.showHalls[0].name; fileHandler = null; }")
+    page.set_input_files("#file-input", str(path))
+    page.wait_for_function("() => STATE.rows.some(r => r.hold === 'Med ønske')")
+    page.click(".rail-link[data-view=program]")
+    page.locator("#hal-tabs .tab").first.click()
+    rows = page.locator("#table-body tr")
+    check("kun hold med en kommentar får 💬", page.locator("#table-body .comment-btn").count() == 1)
+    page.locator("#table-body .comment-btn").click()
+    page.wait_for_selector("#comment-dialog.show")
+    check("klik på 💬 viser hele kommentaren som tekst (ingen HTML)",
+          page.inner_text("#comment-title") == "Med ønske"
+          and page.inner_text("#comment-text") == "<b>Gerne</b> inden kl. 14\nGengangere"
+          and page.locator("#comment-text b").count() == 0, page.inner_text("#comment-text"))
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#comment-dialog", state="hidden")
+    check("Esc lukker vinduet", True)
+
+
 def drop_files(page, selector, files):
     """Slipper filer fra 'computeren' på elementet. files: [(navn, bytes)]."""
     import base64
@@ -762,6 +788,7 @@ def run(mode):
             solve_hall_tests(page, tmp)
             program_move_tests(page, tmp)
             earlier_tests(page, tmp, dialogs)
+            comment_tests(page, tmp)
             drop_tests(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))

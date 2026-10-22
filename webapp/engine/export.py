@@ -11,7 +11,7 @@ from .values import fmt_time
 EXPORT_COLS = [
     "Hold", "Type", "Varighed", "AntalPersoner", "Holdtype",
     "OpvisningHal", "OpvisningTid",
-    "OpvarmningHal", "OpvarmningStartTid", "OpvarmningSlutTid", "Status",
+    "OpvarmningHal", "OpvarmningStartTid", "OpvarmningSlutTid", "Status", "Kommentar",
 ]
 HAL_COLS = ["OpvarmningStartTid", "OpvarmningSlutTid", "Hold", "Holdtype", "OpvisningHal", "OpvisningTid"]
 

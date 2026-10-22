@@ -44,6 +44,7 @@ def to_row_dicts(df: pd.DataFrame, warmup_halls: List[str]) -> List[dict]:
             "opvarmningSlut": fmt_time(r["OpvarmningSlut"]),
             "status": r["Status"],
             "problemMessage": problem_message(r["Status"], warmup_halls),
+            "kommentar": override_str(r.get("Kommentar")),
         })
     return out
 

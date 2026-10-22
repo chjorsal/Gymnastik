@@ -83,6 +83,8 @@ def load_excel_bytes(filename: str, content: bytes, show_hal: str, start_order: 
             AntalPersoner=antal,
             HoldtypeRaw=None if holdtype_raw is None else str(holdtype_raw),
             AlderRaw=None if alder_raw is None else str(alder_raw),
+            # holdets ønsker og bemærkninger (kontaktperson og e-mail læses ikke ind)
+            Kommentar=clean_str(r.get("Kommentar")) or None,
         ))
         order += 1
     return rows, suggested_start
@@ -119,7 +121,7 @@ def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFram
     columns = [
         "id", "Hold", "Type", "AntalPersoner", "Holdtype",
         "OpvisningHal", "Varighed", "OpvisningStart", "OpvarmningMinOverride",
-        "OpvarmningHalOverride", "OpvarmningStartOverride", "Order", "Manual", "_ignored",
+        "OpvarmningHalOverride", "OpvarmningStartOverride", "Order", "Manual", "Kommentar", "_ignored",
     ]
     if not raw_rows:
         return pd.DataFrame(columns=columns)
@@ -129,6 +131,8 @@ def build_dataframe(raw_rows: List[dict], show_halls: List[dict]) -> pd.DataFram
         df["OpvarmningHalOverride"] = None
     if "OpvarmningStartOverride" not in df.columns:
         df["OpvarmningStartOverride"] = None
+    if "Kommentar" not in df.columns:   # planer fra før kommentarerne kom med
+        df["Kommentar"] = None
     # Manual: hold tilføjet i hånden (ikke fra Excel) — navnet kan rettes
     df["Manual"] = df["Manual"].eq(True) if "Manual" in df.columns else False
 
