@@ -232,6 +232,28 @@ def run():
           views["Testby Efterskole"]["status"] == "OK" and views["H"]["status"] == "OK",
           {k: (v["status"], v["opvarmningStart"]) for k, v in views.items()})
 
+    # ---------- efterskoler kun i hallen med stjernen ----------
+    # To efterskoler 10 min fra hinanden. Der er plads i V2, men efterskolerne
+    # må kun være i V1 (stjernen) — så den ene står uden plads i stedet.
+    ek = actions.new_plan()
+    for hal in ("V2", "V1"):
+        actions.create_warmup_hall(ek, hal)
+    actions.set_priority_hall(ek, "V1")
+    for sal, team, start in (("S1", "A Efterskole", "10:00"), ("S2", "B Efterskole", "10:10")):
+        actions.create_show_hall(ek, sal)
+        actions.set_show_hall_start_time(ek, sal, start)
+        actions.upload(ek, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    views = {r["hold"]: r for r in actions.payload(ek)["rows"]}
+    check("efterskoler never warm up outside the starred hall, even when it is free",
+          all(v["opvarmningHalBeregnet"] in ("V1", "") for v in views.values())
+          and [v["status"] for v in views.values()].count("OK") == 1,
+          {k: (v["status"], v["opvarmningHalBeregnet"]) for k, v in views.items()})
+    sol = actions.solve_warmups(ek)
+    check("solve does not move an efterskole to another hall", sol["moves"] == [] and sol["hints"] == [], sol)
+    actions.set_priority_hall(ek, "V2")
+    views = {r["hold"]: r for r in actions.payload(ek)["rows"]}
+    check("moving the star moves the efterskoler", all(v["opvarmningHalBeregnet"] in ("V2", "") for v in views.values()))
+
     # ---------- for tæt i programmet: forslag om at flytte holdet ----------
     # To efterskoler låst til V1, begge med 30 min: A går på 14:00, B 14:10 —
     # for tæt til at begge kan varme op i V1. B kan flyttes i Sal 2 til 14:30.

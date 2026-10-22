@@ -125,8 +125,6 @@ def compute_plan(
     bookings: Dict[str, List[Booking]] = {}
     results: Dict[str, Optional[Tuple[str, datetime, datetime]]] = {}
 
-    halls_uden_prio = [h for h in warmup_halls if h != priority_hall]
-    halls_prio_first = [priority_hall] + halls_uden_prio
 
     def warm_min_for(row) -> int:
         override = override_int(row["OpvarmningMinOverride"])
@@ -165,7 +163,7 @@ def compute_plan(
         if pinned_hal:
             halls_to_try = [pinned_hal]
         elif r["Holdtype"] == "efterskole":
-            halls_to_try = halls_prio_first
+            halls_to_try = [priority_hall]   # efterskoler varmer kun op i prioritetshallen
         else:
             halls_to_try = warmup_halls
         placed = try_place_fixed(bookings, halls_to_try, warm_min, fixed_start, SKIFTE_I_SLOTTET_MIN)
@@ -208,11 +206,14 @@ def compute_plan(
 
     free = ~has_start_override & ~has_hal_override
 
-    # PASS 2: efterskoler, prioritetshallen først
+    # PASS 2: efterskoler — KUN i prioritetshallen (stjernen). Der er ikke
+    # plads til efterskolerne i de andre haller, så de lægges aldrig dér af
+    # sig selv; er der ikke plads, står de uden plads, og Find løsning
+    # foreslår at flytte dem i programmet. (Brugeren kan stadig selv låse en
+    # efterskole til en anden hal.)
     eft_rows = df_plan[(df_plan["Holdtype"] == "efterskole") & free].sort_values("OpvisningStart")
     for _, r in eft_rows.iterrows():
-        results[r["id"]] = _book(bookings, r["Hold"], try_place(
-            bookings, halls_prio_first, warm_min_for(r), r["OpvisningStart"], gang_tid(), 0, 15))
+        results[r["id"]] = place_in_window(r, [priority_hall], 15)
 
     # PASS 3: alle andre hold, i den rækkefølge de går på
     for _, r in df_plan[(df_plan["Holdtype"] != "efterskole") & free].iterrows():

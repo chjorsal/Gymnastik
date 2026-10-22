@@ -601,7 +601,7 @@ function warmupHallItem(name, index, where) {
   const li = document.createElement("li");
   li.className = "hall-item";
   const star = iconButton(isPrio ? "starFilled" : "starOutline",
-    isPrio ? "Efterskolerne varmer op her først" : `Lad efterskolerne varme op i ${name} først`,
+    isPrio ? "Efterskolerne varmer kun op her" : `Gør ${name} til efterskolernes hal`,
     () => update(apiJSON("/api/halls/warmup/priority", "POST", { name })), "star" + (isPrio ? " active" : ""));
   star.setAttribute("aria-pressed", String(isPrio));
   li.append(star, inlineInput(name, "Navn på opvarmningshal", "hall-name-input", `${where}-warmup:${index}`,
@@ -609,7 +609,7 @@ function warmupHallItem(name, index, where) {
   if (isPrio) {
     const prio = document.createElement("span");
     prio.className = "prio";
-    prio.textContent = "Efterskoler først";
+    prio.textContent = "Efterskolernes hal";
     li.appendChild(prio);
   }
   li.appendChild(iconButton("close", `Slet ${name}`, confirmAndRun(
@@ -679,6 +679,11 @@ function stagedFileChip(hal, file) {
   chip.append(icon("file"), name,
     iconButton("close", `Fjern ${file.name}`, () => unstageFile(hal, file.name), "icon-btn-danger"));
   return chip;
+}
+
+// Hallens navn med ★, hvis det er efterskolernes hal (stjernen).
+function prioLabel(name) {
+  return name === STATE.priorityHall ? `★ ${name}` : name;
 }
 
 function renderHalls() {
@@ -1012,7 +1017,7 @@ function renderTimeline(teams) {
 
   STATE.warmupHalls.forEach((hal) => {
     const open = () => { activeWarmupHal = hal; setView("opvarmning"); };
-    const track = lane(hal, open);
+    const track = lane(prioLabel(hal), open);
     // Slip et hold uden plads her: opvarmningen starter hvor det slippes
     // (rundet til 5 min). Serveren afviser, hvis der ikke er plads.
     makeDropTarget(track, (id, e) => {
@@ -1131,7 +1136,7 @@ function renderWarmupHalTabs() {
   document.getElementById("warmup-hal-tabs").replaceChildren(...STATE.warmupHalls.map((name) => {
     const hasProblem = STATE.rows.some((r) => r.opvarmningHalOverride === name && r.problemMessage);
     const count = STATE.rows.filter((r) => r.status === "OK" && r.opvarmningHalBeregnet === name).length;
-    const btn = tabButton(name, count, name === activeWarmupHal,
+    const btn = tabButton(prioLabel(name), count, name === activeWarmupHal,
       hasProblem ? "Et hold der er låst til denne hal kan ikke få plads" : "", () => setActiveWarmupHal(name));
     makeDropTarget(btn, (draggedId) => patchRow(draggedId, "opvarmningHal", name));
     return btn;

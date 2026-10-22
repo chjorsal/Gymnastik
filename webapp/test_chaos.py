@@ -129,6 +129,10 @@ def check_plan(plan, where):
                 errs.append(f"{r['hold']}: opvarmningen starter mere end 45 min før")
             if not r["opvarmningStartOverride"] and r["opvarmningSlutMin"] < r["opvisningMin"] - engine.GANG_MIN - engine.MAX_EARLY_TOTAL_MIN:
                 errs.append(f"{r['hold']}: venter mere end 30 min")
+            prio = plan["priority_hall"]
+            if (r["holdtype"] == "efterskole" and not r["opvarmningHalOverride"]
+                    and r["opvarmningHalBeregnet"] != prio):
+                errs.append(f"{r['hold']}: efterskole uden for stjernehallen ({r['opvarmningHalBeregnet']} != {prio})")
             by_hall.setdefault(r["opvarmningHalBeregnet"], []).append(r)
         elif r["status"] not in ("IGNORERET", "KAN IKKE PLANLÆGGES", "MANGLER"):
             errs.append(f"ukendt status {r['status']!r}")

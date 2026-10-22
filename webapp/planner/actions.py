@@ -475,6 +475,14 @@ def _lock_to(team_id: str, hal: str):
     return change
 
 
+def _halls_for(plan: dict, v: dict) -> List[str]:
+    """De haller holdet må varme op i: efterskoler kun i prioritetshallen."""
+    if v["holdtype"] == "efterskole":
+        prio = plan["priority_hall"] if plan["priority_hall"] in plan["warmup_halls"] else None
+        return [prio or plan["warmup_halls"][0]] if plan["warmup_halls"] else []
+    return list(plan["warmup_halls"])
+
+
 def _try_other_halls(work: dict, u: dict, ok_now: set, halls: List[str]) -> Optional[dict]:
     """Giv holdet pladsen i en af hallerne først; de andre hold kan så rykke
     over i andre haller. Koster ingen minutter."""
@@ -602,7 +610,7 @@ def solve_warmups(plan: dict) -> dict:
         for u in unplaced:
             trial = None
             if u["id"] not in user_fixed:
-                trial = _try_other_halls(work, u, ok_now, plan["warmup_halls"])
+                trial = _try_other_halls(work, u, ok_now, _halls_for(plan, u))
             if trial is None:
                 trial = _try_shorter(work, u, views, ok_now)
             if trial is None:
@@ -632,7 +640,7 @@ def solve_warmups(plan: dict) -> dict:
         locked = engine.override_str(raw_before[v["id"]].get("OpvarmningHalOverride"))
         if not locked or engine.override_str(raw_before[v["id"]].get("OpvarmningStartOverride")):
             continue
-        for hal in plan["warmup_halls"]:
+        for hal in _halls_for(plan, v):
             if hal != locked and _fits(work, v["id"], ok_final, _lock_to(v["id"], hal)):
                 hints.append({"id": v["id"], "hold": v["hold"], "lockedHal": locked, "freeHal": hal})
                 break

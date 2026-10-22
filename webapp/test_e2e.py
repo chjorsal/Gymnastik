@@ -35,10 +35,10 @@ def common_flow(page, url, xlsx, dialogs, errors):
         page.wait_for_function(f"document.querySelectorAll('#onb-warmup-list li').length === {i}")
     check("første opvarmningshal er prioritetshal fra start",
           page.evaluate("() => STATE.priorityHall") == "Varm 1"
-          and "Efterskoler først" in page.locator("#onb-warmup-list li").first.inner_text())
+          and "Efterskolernes hal" in page.locator("#onb-warmup-list li").first.inner_text())
     page.locator("#onb-warmup-list li").nth(1).locator(".star").click()
     page.wait_for_function("() => STATE.priorityHall === 'Varm 2'")
-    check("stjernen gør en anden hal til prioritetshal", "Efterskoler først" in page.locator("#onb-warmup-list li").nth(1).inner_text())
+    check("stjernen gør en anden hal til prioritetshal", "Efterskolernes hal" in page.locator("#onb-warmup-list li").nth(1).inner_text())
     page.locator("#onb-warmup-list li").first.locator(".star").click()
     page.wait_for_function("() => STATE.priorityHall === 'Varm 1'")
     first = page.locator("#onb-show-list li").first
