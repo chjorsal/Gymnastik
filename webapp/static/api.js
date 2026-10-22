@@ -186,7 +186,7 @@ const Api = (() => {
           const buf = await (await fetch(`wheels/${whl}`)).arrayBuffer();
           py.unpackArchive(buf, "zip", { extractDir: sitePackages });
         }
-        const code = await (await fetch("planner.zip")).arrayBuffer();
+        const code = await (await fetch(`planner.zip?v=${config.planner || ""}`)).arrayBuffer();
         py.unpackArchive(code, "zip", { extractDir: "/home/pyodide/app" });
         py.runPython("import sys; sys.path.insert(0, '/home/pyodide/app')");
         bridge = py.pyimport("planner.browser");

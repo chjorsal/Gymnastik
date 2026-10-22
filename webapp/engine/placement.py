@@ -137,6 +137,8 @@ def compute_plan(
         eksisterende opvarmningshal, bruges KUN den hal (ingen automatisk
         fallback til andre haller)."""
         hal = override_str(row["OpvarmningHalOverride"])
+        if row["Holdtype"] == "efterskole" and hal != priority_hall:
+            return None   # efterskoler varmer kun op i efterskolernes hal (også gamle låse)
         return hal if hal in warmup_halls else None
 
     def start_override_for(row) -> Optional[datetime]:

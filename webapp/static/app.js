@@ -837,7 +837,7 @@ function renderSolveResult() {
   }
   box.classList.remove("hidden");
   box.replaceChildren();
-  const { changes, moves, placed, remaining, hints, programMoves } = solveResult;
+  const { changes, moves, placed, remaining, hints, programMoves, crowded } = solveResult;
   const line = (text) => {
     const p = document.createElement("p");
     p.textContent = text;
@@ -861,7 +861,7 @@ function renderSolveResult() {
       ul.appendChild(li);
     });
     box.appendChild(ul);
-  } else if (!hints.length && !programMoves.length) {
+  } else if (!hints.length && !programMoves.length && !crowded.length) {
     line("Ingen løsning fundet: der er ikke plads i nogen hal, heller ikke med 10 min opvarmning til holdene omkring. "
       + "Flyt holdet i programmet, eller træk det ind på tidslinjen.");
   }
@@ -891,7 +891,14 @@ function renderSolveResult() {
       onSolve();   // regn forfra med det nye program
     }));
   });
-  const hinted = new Set([...hints.map((h) => h.hold), ...programMoves.map((m) => m.hold)]);
+  // Ingen plads at flytte til (samme side af kl. 13): sig hvorfor.
+  crowded.forEach((c) => {
+    const p = line(`${c.hold} (går på ${c.opvisningTid} i ${c.opvisningHal}) går på for tæt på ${c.crowdedBy} til, at begge `
+      + `kan varme op i ${c.warmupHal}, og der er ikke et andet tidspunkt på samme side af kl. 13, hvor det passer. `
+      + "Flyt et af holdene i programmet.");
+    p.className = "solve-hint";
+  });
+  const hinted = new Set([...hints, ...programMoves, ...crowded].map((h) => h.hold));
   const stuck = remaining.filter((name) => !hinted.has(name));
   if (placed.length && stuck.length) {
     line(`Stadig uden plads: ${stuck.join(", ")}. Flyt holdet i programmet, eller træk det ind på tidslinjen.`);
@@ -1162,7 +1169,9 @@ function buildWarmInput(row, focusPrefix) {
 function buildMoveHalSelect(row) {
   const moveSelect = document.createElement("select");
   moveSelect.className = "form-select form-select-sm cell-input";
-  [["", "Automatisk"], ...STATE.warmupHalls.map((name) => [name, name])].forEach(([value, label]) => {
+  // Efterskoler kan kun være i efterskolernes hal (stjernen).
+  const halls = row.holdtype === "efterskole" ? STATE.warmupHalls.filter((h) => h === STATE.priorityHall) : STATE.warmupHalls;
+  [["", "Automatisk"], ...halls.map((name) => [name, prioLabel(name)])].forEach(([value, label]) => {
     const o = document.createElement("option");
     o.value = value;
     o.textContent = label;

@@ -6,8 +6,8 @@ from .config import GANG_MIN, GYLDIGE_HOLDTYPER, OPVARMNING_TIDER, TYPE_KEYWORDS
 from .values import clean_str
 
 
-def classify_type(hold_text: str) -> str:
-    s = (hold_text or "").strip().lower()
+def classify_type(hold_text) -> str:
+    s = clean_str(hold_text).lower()   # tåler også tomme celler (NaN) og tal
     if not s or s in ("nan", "none"):
         return "andet"
     for pattern, t in TYPE_KEYWORDS:

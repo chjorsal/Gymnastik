@@ -84,11 +84,15 @@ def _pypi_wheels(out: Path) -> list:
     return names
 
 
-def _planner_zip(out: Path) -> None:
+def _planner_zip(out: Path) -> str:
+    """Pakker Python-koden og returnerer en kort hash af den. Hashen sættes på
+    adressen (planner.zip?v=...), så browseren aldrig bruger en gammel kopi
+    efter en opdatering."""
     with zipfile.ZipFile(out / "planner.zip", "w", zipfile.ZIP_DEFLATED) as z:
         for package in ("engine", "planner"):
             for py in sorted((HERE / package).rglob("*.py")):
                 z.write(py, py.relative_to(HERE).as_posix())
+    return hashlib.sha256((out / "planner.zip").read_bytes()).hexdigest()[:12]
 
 
 def build(out: Path) -> None:
@@ -98,10 +102,10 @@ def build(out: Path) -> None:
     shutil.copytree(HERE / "static", out)
     _pyodide(out)
     wheels = _pypi_wheels(out)
-    _planner_zip(out)
+    planner_version = _planner_zip(out)
     (out / "config.js").write_text(
         "// Genereret af build_site.py — browserudgaven.\n"
-        f"window.PLANNER_CONFIG = {json.dumps({'mode': 'browser', 'wheels': wheels})};\n",
+        f"window.PLANNER_CONFIG = {json.dumps({'mode': 'browser', 'wheels': wheels, 'planner': planner_version})};\n",
         encoding="utf-8",
     )
     (out / ".nojekyll").write_text("", encoding="utf-8")   # GitHub Pages: ingen Jekyll

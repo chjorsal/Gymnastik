@@ -254,6 +254,29 @@ def run():
     views = {r["hold"]: r for r in actions.payload(ek)["rows"]}
     check("moving the star moves the efterskoler", all(v["opvarmningHalBeregnet"] in ("V2", "") for v in views.values()))
 
+    # en gammel lås til en anden hal (fx fra den tidligere Find løsning) gælder
+    # ikke for efterskoler — de kommer tilbage i efterskolernes hal
+    old = actions.new_plan()
+    for hal in ("Hal 3 A", "Hal 4"):
+        actions.create_warmup_hall(old, hal)
+    actions.set_priority_hall(old, "Hal 4")
+    actions.create_show_hall(old, "Hal 2")
+    actions.upload(old, [("d.xlsx", excel_bytes(["Vesterbølle efterskole", "Almindeligt hold"]))], show_hal="Hal 2")
+    old["raw_rows"][0]["OpvarmningHalOverride"] = "Hal 3 A"      # som en gemt plan fra før
+    view = {r["hold"]: r for r in actions.payload(old)["rows"]}["Vesterbølle efterskole"]
+    check("an old lock of an efterskole to another hall is ignored", view["opvarmningHalBeregnet"] == "Hal 4", view)
+    eid = old["raw_rows"][0]["id"]
+    err = raises(lambda: actions.patch_row(old, eid, "opvarmningHal", "Hal 3 A"), 400)
+    check("locking an efterskole to a hall without the star is refused",
+          err is not None and "efterskolernes hal (Hal 4)" in err.message, err and err.message)
+    check("an efterskole cannot be dragged to another hall either",
+          raises(lambda: actions.place_warmup(old, eid, "Hal 3 A", "09:00"), 400) is not None)
+    other = old["raw_rows"][1]["id"]
+    actions.patch_row(old, other, "opvarmningHal", "Hal 3 A")
+    check("ordinary teams can still be locked to any hall", old["raw_rows"][1]["OpvarmningHalOverride"] == "Hal 3 A")
+    check("'Tak for i dag', 'Afslutning' and 'Præmieoverrækkelse' need no warm-up",
+          [actions.engine.classify_type(x) for x in ("Tak for i dag", "Afslutning", "Præmieoverrækkelse")] == ["andet"] * 3)
+
     # ---------- for tæt i programmet: forslag om at flytte holdet ----------
     # To efterskoler låst til V1, begge med 30 min: A går på 14:00, B 14:10 —
     # for tæt til at begge kan varme op i V1. B kan flyttes i Sal 2 til 14:30.
@@ -559,7 +582,7 @@ def run():
         plan_eft, [{"id": plan_eft["raw_rows"][1]["id"], "minutes": 12},
                    {"id": plan_eft["raw_rows"][2]["id"], "hal": "Findes ikke"}]), 400) is not None and plan_eft == before)
     check("solve with nothing to solve returns empty", actions.solve_warmups(actions.new_plan())
-          == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": [], "programMoves": []})
+          == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": [], "programMoves": [], "crowded": []})
 
     # ---------- Find løsning prøver også andre haller ----------
     # A går på kl. 10 og tager V1 09:40–09:55. L går på 10:10, men V2 er

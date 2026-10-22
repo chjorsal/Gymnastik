@@ -25,6 +25,9 @@ def run():
     m = re.search(r"window\.PLANNER_CONFIG = (\{.*\});", cfg)
     config = json.loads(m.group(1)) if m else {}
     check("config.js selects browser mode", config.get("mode") == "browser", cfg)
+    import hashlib
+    check("config.js carries the planner.zip version, so browsers never use an old copy",
+          config.get("planner") == hashlib.sha256((out / "planner.zip").read_bytes()).hexdigest()[:12], config)
     check("config.js lists the two wheels",
           sorted(config.get("wheels", [])) == ["et_xmlfile-2.0.0-py3-none-any.whl", "openpyxl-3.1.5-py2.py3-none-any.whl"],
           config)

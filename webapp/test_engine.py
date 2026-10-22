@@ -16,6 +16,8 @@ def run():
     # classify_type
     # ============================================================
     check("classify_type empty -> andet", engine.classify_type("") == "andet")
+    check("classify_type tolerates NaN, None and numbers",
+          [engine.classify_type(x) for x in (float("nan"), None, 12)] == ["andet", "andet", "hold"])
     check("classify_type None -> andet", engine.classify_type(None) == "andet")
     check("classify_type whitespace -> andet", engine.classify_type("   ") == "andet")
     check("classify_type Pause -> pause", engine.classify_type("Pause") == "pause")
