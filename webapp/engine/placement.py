@@ -125,8 +125,6 @@ def compute_plan(
     bookings: Dict[str, List[Booking]] = {}
     results: Dict[str, Optional[Tuple[str, datetime, datetime]]] = {}
 
-    halls_uden_prio = [h for h in warmup_halls if h != priority_hall]
-    halls_prio_first = [priority_hall] + halls_uden_prio
 
     def warm_min_for(row) -> int:
         override = override_int(row["OpvarmningMinOverride"])
@@ -165,7 +163,7 @@ def compute_plan(
         if pinned_hal:
             halls_to_try = [pinned_hal]
         elif r["Holdtype"] == "efterskole":
-            halls_to_try = halls_prio_first
+            halls_to_try = [priority_hall]   # efterskoler varmer kun op i prioritetshallen
         else:
             halls_to_try = warmup_halls
         placed = try_place_fixed(bookings, halls_to_try, warm_min, fixed_start, SKIFTE_I_SLOTTET_MIN)
@@ -187,22 +185,35 @@ def compute_plan(
             placed = try_place(*args, MAX_EARLY_TOTAL_MIN)
         return _book(bookings, r["Hold"], placed)
 
+    def slack(r) -> int:
+        """Hvor mange minutter opvarmningen kan flyttes frem: højst 25, og
+        mindre for lange opvarmninger (de må starte højst 45 min før)."""
+        return min(MAX_EARLY_TOTAL_MIN, MAX_START_BEFORE_MIN - gang_tid() - warm_min_for(r))
+
     # PASS 1: hold som brugeren har låst til én hal (uden fast tidspunkt).
     # De kan kun være dér, så de får deres plads, før hold der kan varme op
     # hvor som helst — ellers kan et frit hold tage den sidste plads i hallen.
+    # De mindst fleksible først (fx efterskoler med 30 min, som kun kan flytte
+    # sig 10 min), så et låst hold med 15 min ikke tager deres eneste hul.
     has_hal_override = df_plan.apply(lambda r: hal_override_for(r) is not None, axis=1)
-    hal_locked = df_plan[has_hal_override & ~has_start_override].sort_values("OpvisningStart")
+    hal_locked = df_plan[has_hal_override & ~has_start_override].copy()
+    hal_locked["_slack"] = hal_locked.apply(slack, axis=1)
+    hal_locked["_not_eft"] = hal_locked["Holdtype"] != "efterskole"   # lige fleksible: efterskolen først
+    hal_locked = hal_locked.sort_values(["_slack", "_not_eft", "OpvisningStart"], kind="stable")
     for _, r in hal_locked.iterrows():
         first = MAX_EARLY_TOTAL_MIN if r["Holdtype"] == "efterskole" else MAX_EARLY_MIN
         results[r["id"]] = place_in_window(r, [hal_override_for(r)], first)
 
     free = ~has_start_override & ~has_hal_override
 
-    # PASS 2: efterskoler, prioritetshallen først
+    # PASS 2: efterskoler — KUN i prioritetshallen (stjernen). Der er ikke
+    # plads til efterskolerne i de andre haller, så de lægges aldrig dér af
+    # sig selv; er der ikke plads, står de uden plads, og Find løsning
+    # foreslår at flytte dem i programmet. (Brugeren kan stadig selv låse en
+    # efterskole til en anden hal.)
     eft_rows = df_plan[(df_plan["Holdtype"] == "efterskole") & free].sort_values("OpvisningStart")
     for _, r in eft_rows.iterrows():
-        results[r["id"]] = _book(bookings, r["Hold"], try_place(
-            bookings, halls_prio_first, warm_min_for(r), r["OpvisningStart"], gang_tid(), 0, 15))
+        results[r["id"]] = place_in_window(r, [priority_hall], 15)
 
     # PASS 3: alle andre hold, i den rækkefølge de går på
     for _, r in df_plan[(df_plan["Holdtype"] != "efterskole") & free].iterrows():

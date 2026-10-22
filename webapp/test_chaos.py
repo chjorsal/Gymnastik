@@ -129,6 +129,10 @@ def check_plan(plan, where):
                 errs.append(f"{r['hold']}: opvarmningen starter mere end 45 min før")
             if not r["opvarmningStartOverride"] and r["opvarmningSlutMin"] < r["opvisningMin"] - engine.GANG_MIN - engine.MAX_EARLY_TOTAL_MIN:
                 errs.append(f"{r['hold']}: venter mere end 30 min")
+            prio = plan["priority_hall"]
+            if (r["holdtype"] == "efterskole" and not r["opvarmningHalOverride"]
+                    and r["opvarmningHalBeregnet"] != prio):
+                errs.append(f"{r['hold']}: efterskole uden for stjernehallen ({r['opvarmningHalBeregnet']} != {prio})")
             by_hall.setdefault(r["opvarmningHalBeregnet"], []).append(r)
         elif r["status"] not in ("IGNORERET", "KAN IKKE PLANLÆGGES", "MANGLER"):
             errs.append(f"ukendt status {r['status']!r}")
@@ -231,7 +235,19 @@ def random_step(rng, plan, log):
         if plan != before:
             raise AssertionError("solve_warmups ændrede planen")
         json.dumps(s)
-        log.append(f"solve placed={len(s['placed'])} changes={len(s['changes'])} moves={len(s['moves'])}")
+        log.append(f"solve placed={len(s['placed'])} changes={len(s['changes'])} moves={len(s['moves'])} "
+                   f"program={len(s['programMoves'])}")
+        if s["programMoves"] and rng.random() < 0.5:
+            m = rng.choice(s["programMoves"])
+            v0 = A._views(plan)
+            A.reorder_rows(plan, m["opvisningHal"], m["orderedIds"])
+            v1 = A._views(plan)
+            if v1[m["id"]]["status"] != "OK" or not A._ok_ids(v0) <= A._ok_ids(v1):
+                raise AssertionError("forslaget om at flytte i programmet gav ikke plads eller skubbede hold ud")
+            if any((v0[i]["opvisningMin"] >= 780) != (v1[i]["opvisningMin"] >= 780)
+                   for i in v0 if v0[i]["opvisningMin"] is not None):
+                raise AssertionError("forslaget om at flytte i programmet flyttede et hold over kl. 13")
+            return
         if rng.random() < 0.8:
             v0 = A._views(plan)
             ok_before = A._ok_ids(v0)

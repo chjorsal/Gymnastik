@@ -214,6 +214,76 @@ def run():
     actions.patch_row(st, a["id"], "opvarmningMin", 40)
     check("40 min warm-up is allowed", a["OpvarmningMinOverride"] == 40)
 
+    # ---------- låste hold: de mindst fleksible får plads først ----------
+    # Efterskolen E (30 min, går på 10:10) og hold H (15 min, går på 10:00) er
+    # begge låst til V1. H går på først, men kan varme op tidligere; E kan
+    # kun flytte sig 10 min. Før tog H pladsen, så E stod uden plads.
+    lf = actions.new_plan()
+    for hal in ("V1", "V2"):
+        actions.create_warmup_hall(lf, hal)
+    for sal, team, start in (("S1", "H", "10:00"), ("S2", "Testby Efterskole", "10:10")):
+        actions.create_show_hall(lf, sal)
+        actions.set_show_hall_start_time(lf, sal, start)
+        actions.upload(lf, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    for r in lf["raw_rows"]:
+        actions.patch_row(lf, r["id"], "opvarmningHal", "V1")
+    views = {r["hold"]: r for r in actions.payload(lf)["rows"]}
+    check("a locked efterskole gets its slot before a more flexible locked team",
+          views["Testby Efterskole"]["status"] == "OK" and views["H"]["status"] == "OK",
+          {k: (v["status"], v["opvarmningStart"]) for k, v in views.items()})
+
+    # ---------- efterskoler kun i hallen med stjernen ----------
+    # To efterskoler 10 min fra hinanden. Der er plads i V2, men efterskolerne
+    # må kun være i V1 (stjernen) — så den ene står uden plads i stedet.
+    ek = actions.new_plan()
+    for hal in ("V2", "V1"):
+        actions.create_warmup_hall(ek, hal)
+    actions.set_priority_hall(ek, "V1")
+    for sal, team, start in (("S1", "A Efterskole", "10:00"), ("S2", "B Efterskole", "10:10")):
+        actions.create_show_hall(ek, sal)
+        actions.set_show_hall_start_time(ek, sal, start)
+        actions.upload(ek, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+    views = {r["hold"]: r for r in actions.payload(ek)["rows"]}
+    check("efterskoler never warm up outside the starred hall, even when it is free",
+          all(v["opvarmningHalBeregnet"] in ("V1", "") for v in views.values())
+          and [v["status"] for v in views.values()].count("OK") == 1,
+          {k: (v["status"], v["opvarmningHalBeregnet"]) for k, v in views.items()})
+    sol = actions.solve_warmups(ek)
+    check("solve does not move an efterskole to another hall", sol["moves"] == [] and sol["hints"] == [], sol)
+    actions.set_priority_hall(ek, "V2")
+    views = {r["hold"]: r for r in actions.payload(ek)["rows"]}
+    check("moving the star moves the efterskoler", all(v["opvarmningHalBeregnet"] in ("V2", "") for v in views.values()))
+
+    # ---------- for tæt i programmet: forslag om at flytte holdet ----------
+    # To efterskoler låst til V1, begge med 30 min: A går på 14:00, B 14:10 —
+    # for tæt til at begge kan varme op i V1. B kan flyttes i Sal 2 til 14:30.
+    pm = actions.new_plan()
+    for hal in ("V1", "V2"):
+        actions.create_warmup_hall(pm, hal)
+    actions.create_show_hall(pm, "Sal 1")
+    actions.set_show_hall_start_time(pm, "Sal 1", "14:00")
+    actions.upload(pm, [("a.xlsx", excel_bytes(["A Efterskole"]))], show_hal="Sal 1")
+    actions.create_show_hall(pm, "Sal 2")
+    actions.set_show_hall_start_time(pm, "Sal 2", "13:30")
+    actions.upload(pm, [("b.xlsx", excel_bytes([("X1", 20), ("X2", 20), ("B Efterskole", 20), ("X3", 20), ("X4", 20)]))],
+                   show_hal="Sal 2")
+    for r in pm["raw_rows"]:
+        actions.patch_row(pm, r["id"], "opvarmningHal", "V1" if "Efterskole" in r["Hold"] else "V2")
+    views = {r["hold"]: r for r in actions.payload(pm)["rows"]}
+    check("scenario: B Efterskole has no room (too close to A)", views["B Efterskole"]["status"] != "OK", views["B Efterskole"])
+    before = copy.deepcopy(pm)
+    sol = actions.solve_warmups(pm)
+    moves = sol["programMoves"]
+    check("solve suggests moving B in the program, without changing the plan",
+          pm == before and [(m["hold"], m["fromTid"], m["toTid"], m["after"], m["crowdedBy"]) for m in moves]
+          == [("B Efterskole", "14:10", "14:30", "X3", "A Efterskole")], moves)
+    sides = {r["hold"]: r["opvisningMin"] >= 13 * 60 for r in actions.payload(pm)["rows"]}
+    actions.reorder_rows(pm, moves[0]["opvisningHal"], moves[0]["orderedIds"])
+    after = actions.payload(pm)["rows"]
+    check("after the move every team has room", all(r["status"] == "OK" for r in after if r["needsWarmup"]),
+          [(r["hold"], r["status"]) for r in after])
+    check("no team changes side of 13:00", all((r["opvisningMin"] >= 13 * 60) == sides[r["hold"]] for r in after))
+
     # ---------- fundet af kaos-testen ----------
     cz = plan_with_halls()
     actions.upload(cz, [("d.xlsx", excel_bytes(["A", "B", "C", "D"]))], show_hal="Sal A")
@@ -489,7 +559,7 @@ def run():
         plan_eft, [{"id": plan_eft["raw_rows"][1]["id"], "minutes": 12},
                    {"id": plan_eft["raw_rows"][2]["id"], "hal": "Findes ikke"}]), 400) is not None and plan_eft == before)
     check("solve with nothing to solve returns empty", actions.solve_warmups(actions.new_plan())
-          == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": []})
+          == {"changes": [], "moves": [], "placed": [], "remaining": [], "hints": [], "programMoves": []})
 
     # ---------- Find løsning prøver også andre haller ----------
     # A går på kl. 10 og tager V1 09:40–09:55. L går på 10:10, men V2 er

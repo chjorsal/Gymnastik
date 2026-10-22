@@ -475,6 +475,14 @@ def _lock_to(team_id: str, hal: str):
     return change
 
 
+def _halls_for(plan: dict, v: dict) -> List[str]:
+    """De haller holdet må varme op i: efterskoler kun i prioritetshallen."""
+    if v["holdtype"] == "efterskole":
+        prio = plan["priority_hall"] if plan["priority_hall"] in plan["warmup_halls"] else None
+        return [prio or plan["warmup_halls"][0]] if plan["warmup_halls"] else []
+    return list(plan["warmup_halls"])
+
+
 def _try_other_halls(work: dict, u: dict, ok_now: set, halls: List[str]) -> Optional[dict]:
     """Giv holdet pladsen i en af hallerne først; de andre hold kan så rykke
     over i andre haller. Koster ingen minutter."""
@@ -517,6 +525,61 @@ def _try_shorter(work: dict, u: dict, views: dict, ok_now: set) -> Optional[dict
     return None
 
 
+# Holdene kan kun ønske, om de går på før eller efter kl. 13. Et forslag om
+# at flytte et hold i programmet må aldrig flytte et hold over den grænse.
+NOON_SPLIT_MIN = 13 * 60
+PROGRAM_MOVE_MAX_TEAMS = 5   # begræns beregningen, hvis rigtig mange hold mangler plads
+
+
+def _after_one(minutes: Optional[int]) -> bool:
+    return minutes is not None and minutes >= NOON_SPLIT_MIN
+
+
+def _crowded_by(views: dict, u: dict, hal: Optional[str]) -> Optional[str]:
+    """Det hold, der varmer op i hallen i det tidsrum, u skulle have brugt —
+    det nærmeste, målt på hvornår de går på. None hvis der ikke er et."""
+    if not hal:
+        return None
+    lo = u["opvisningMin"] - engine.MAX_START_BEFORE_MIN
+    hi = u["opvisningMin"] - engine.GANG_MIN
+    near = [v for v in views.values() if v["status"] == "OK" and v["opvarmningHalBeregnet"] == hal
+            and v["opvarmningStartMin"] < hi and v["opvarmningSlutMin"] > lo]
+    return min(near, key=lambda v: abs(v["opvisningMin"] - u["opvisningMin"]))["hold"] if near else None
+
+
+def _program_move(plan: dict, views: dict, u: dict) -> Optional[dict]:
+    """Det nærmeste sted i programmet (samme opvisningshal), hvor holdet får
+    plads, uden at andre hold mister deres plads, og uden at noget hold
+    skifter side af kl. 13. None hvis der ikke er et."""
+    hal = u["opvisningHal"]
+    order = [r["id"] for r in sorted(_rows_in(plan, hal), key=lambda r: r["Order"])]
+    ok_now = _ok_ids(views)
+    sides = {rid: _after_one(views[rid]["opvisningMin"]) for rid in order}
+    rest = [rid for rid in order if rid != u["id"]]
+    best = None
+    for pos in range(len(order)):
+        new = rest[:pos] + [u["id"]] + rest[pos:]
+        if new == order:
+            continue
+        trial = copy.deepcopy(plan)
+        reorder_rows(trial, hal, new)
+        after = _views(trial)
+        if after[u["id"]]["status"] != "OK" or not ok_now <= _ok_ids(after):
+            continue
+        if any(_after_one(after[rid]["opvisningMin"]) != sides[rid] for rid in order):
+            continue
+        shift = abs(after[u["id"]]["opvisningMin"] - u["opvisningMin"])
+        if best is None or shift < best[0]:
+            best = (shift, new, after)
+    if best is None:
+        return None
+    _, new, after = best
+    i = new.index(u["id"])
+    return {"id": u["id"], "hold": u["hold"], "opvisningHal": hal,
+            "fromTid": u["opvisningTid"], "toTid": after[u["id"]]["opvisningTid"],
+            "after": views[new[i - 1]]["hold"] if i else None, "orderedIds": new}
+
+
 def solve_warmups(plan: dict) -> dict:
     """Prøver at give hold uden plads en opvarmning. For hvert hold, efter
     opvisningstid: først en anden hal (koster ingen minutter), så kortere
@@ -525,7 +588,8 @@ def solve_warmups(plan: dict) -> dict:
 
     Hold, som brugeren selv har lagt i en hal eller på et tidspunkt, flyttes
     aldrig. Står et låst hold stadig uden plads, men er der plads i en anden
-    hal, kommer det med som et tip, så brugeren selv kan vælge.
+    hal, kommer det med som et tip, så brugeren selv kan vælge. Ellers kan
+    der komme et forslag om at flytte holdet i programmet (programMoves).
     Ændrer ikke planen — returnerer forslaget."""
     work = copy.deepcopy(plan)
     original = _views(plan)
@@ -546,7 +610,7 @@ def solve_warmups(plan: dict) -> dict:
         for u in unplaced:
             trial = None
             if u["id"] not in user_fixed:
-                trial = _try_other_halls(work, u, ok_now, plan["warmup_halls"])
+                trial = _try_other_halls(work, u, ok_now, _halls_for(plan, u))
             if trial is None:
                 trial = _try_shorter(work, u, views, ok_now)
             if trial is None:
@@ -576,10 +640,23 @@ def solve_warmups(plan: dict) -> dict:
         locked = engine.override_str(raw_before[v["id"]].get("OpvarmningHalOverride"))
         if not locked or engine.override_str(raw_before[v["id"]].get("OpvarmningStartOverride")):
             continue
-        for hal in plan["warmup_halls"]:
+        for hal in _halls_for(plan, v):
             if hal != locked and _fits(work, v["id"], ok_final, _lock_to(v["id"], hal)):
                 hints.append({"id": v["id"], "hold": v["hold"], "lockedHal": locked, "freeHal": hal})
                 break
+    # Hold, der stadig ikke kan få plads: ligger de for tæt på et andet hold i
+    # programmet, foreslås et andet tidspunkt (beregnet på planen, som den er).
+    program_moves = []
+    hinted = {h["id"] for h in hints}
+    for v in remaining:
+        if v["id"] in hinted or len(program_moves) >= PROGRAM_MOVE_MAX_TEAMS or v["opvisningMin"] is None:
+            continue
+        move = _program_move(plan, original, original[v["id"]])
+        if move:
+            hal = engine.override_str(raw_before[v["id"]].get("OpvarmningHalOverride"))
+            move["warmupHal"] = hal
+            move["crowdedBy"] = _crowded_by(original, original[v["id"]], hal)
+            program_moves.append(move)
     order = lambda c: (c["opvisningHal"], c["opvisningTid"])
     return {
         "changes": sorted(changes, key=order),
@@ -587,6 +664,7 @@ def solve_warmups(plan: dict) -> dict:
         "placed": [v["hold"] for v in was_unplaced if final[v["id"]]["status"] == "OK"],
         "remaining": [v["hold"] for v in remaining],
         "hints": hints,
+        "programMoves": program_moves,
     }
 
 

@@ -601,7 +601,7 @@ function warmupHallItem(name, index, where) {
   const li = document.createElement("li");
   li.className = "hall-item";
   const star = iconButton(isPrio ? "starFilled" : "starOutline",
-    isPrio ? "Efterskolerne varmer op her først" : `Lad efterskolerne varme op i ${name} først`,
+    isPrio ? "Efterskolerne varmer kun op her" : `Gør ${name} til efterskolernes hal`,
     () => update(apiJSON("/api/halls/warmup/priority", "POST", { name })), "star" + (isPrio ? " active" : ""));
   star.setAttribute("aria-pressed", String(isPrio));
   li.append(star, inlineInput(name, "Navn på opvarmningshal", "hall-name-input", `${where}-warmup:${index}`,
@@ -609,7 +609,7 @@ function warmupHallItem(name, index, where) {
   if (isPrio) {
     const prio = document.createElement("span");
     prio.className = "prio";
-    prio.textContent = "Efterskoler først";
+    prio.textContent = "Efterskolernes hal";
     li.appendChild(prio);
   }
   li.appendChild(iconButton("close", `Slet ${name}`, confirmAndRun(
@@ -679,6 +679,11 @@ function stagedFileChip(hal, file) {
   chip.append(icon("file"), name,
     iconButton("close", `Fjern ${file.name}`, () => unstageFile(hal, file.name), "icon-btn-danger"));
   return chip;
+}
+
+// Hallens navn med ★, hvis det er efterskolernes hal (stjernen).
+function prioLabel(name) {
+  return name === STATE.priorityHall ? `★ ${name}` : name;
 }
 
 function renderHalls() {
@@ -832,7 +837,7 @@ function renderSolveResult() {
   }
   box.classList.remove("hidden");
   box.replaceChildren();
-  const { changes, moves, placed, remaining, hints } = solveResult;
+  const { changes, moves, placed, remaining, hints, programMoves } = solveResult;
   const line = (text) => {
     const p = document.createElement("p");
     p.textContent = text;
@@ -856,7 +861,7 @@ function renderSolveResult() {
       ul.appendChild(li);
     });
     box.appendChild(ul);
-  } else if (!hints.length) {
+  } else if (!hints.length && !programMoves.length) {
     line("Ingen løsning fundet: der er ikke plads i nogen hal, heller ikke med 10 min opvarmning til holdene omkring. "
       + "Flyt holdet i programmet, eller træk det ind på tidslinjen.");
   }
@@ -871,7 +876,22 @@ function renderSolveResult() {
       return patchRow(h.id, "opvarmningHal", h.freeHal);
     }));
   });
-  const hinted = new Set(hints.map((h) => h.hold));
+  // Ligger holdet for tæt på et andet i programmet: foreslå et andet
+  // tidspunkt (samme side af kl. 13). Programmet ændres kun, hvis du klikker.
+  programMoves.forEach((m) => {
+    const why = m.crowdedBy && m.warmupHal
+      ? `${m.hold} går på for tæt på ${m.crowdedBy} til, at begge kan varme op i ${m.warmupHal}.`
+      : `Der er ikke plads til ${m.hold}s opvarmning omkring kl. ${m.fromTid}.`;
+    const where = m.after ? `efter ${m.after}` : `først i ${m.opvisningHal}`;
+    const p = line(`${why} Forslag: flyt holdet i programmet fra ${m.fromTid} til ${m.toTid} (${where}). `);
+    p.className = "solve-hint";
+    p.appendChild(smallButton("Flyt i programmet", "btn-outline-secondary", async () => {
+      solveResult = null;
+      await update(apiJSON("/api/rows/reorder", "POST", { hal: m.opvisningHal, orderedIds: m.orderedIds }));
+      onSolve();   // regn forfra med det nye program
+    }));
+  });
+  const hinted = new Set([...hints.map((h) => h.hold), ...programMoves.map((m) => m.hold)]);
   const stuck = remaining.filter((name) => !hinted.has(name));
   if (placed.length && stuck.length) {
     line(`Stadig uden plads: ${stuck.join(", ")}. Flyt holdet i programmet, eller træk det ind på tidslinjen.`);
@@ -997,7 +1017,7 @@ function renderTimeline(teams) {
 
   STATE.warmupHalls.forEach((hal) => {
     const open = () => { activeWarmupHal = hal; setView("opvarmning"); };
-    const track = lane(hal, open);
+    const track = lane(prioLabel(hal), open);
     // Slip et hold uden plads her: opvarmningen starter hvor det slippes
     // (rundet til 5 min). Serveren afviser, hvis der ikke er plads.
     makeDropTarget(track, (id, e) => {
@@ -1116,7 +1136,7 @@ function renderWarmupHalTabs() {
   document.getElementById("warmup-hal-tabs").replaceChildren(...STATE.warmupHalls.map((name) => {
     const hasProblem = STATE.rows.some((r) => r.opvarmningHalOverride === name && r.problemMessage);
     const count = STATE.rows.filter((r) => r.status === "OK" && r.opvarmningHalBeregnet === name).length;
-    const btn = tabButton(name, count, name === activeWarmupHal,
+    const btn = tabButton(prioLabel(name), count, name === activeWarmupHal,
       hasProblem ? "Et hold der er låst til denne hal kan ikke få plads" : "", () => setActiveWarmupHal(name));
     makeDropTarget(btn, (draggedId) => patchRow(draggedId, "opvarmningHal", name));
     return btn;

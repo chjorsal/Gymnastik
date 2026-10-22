@@ -35,10 +35,10 @@ def common_flow(page, url, xlsx, dialogs, errors):
         page.wait_for_function(f"document.querySelectorAll('#onb-warmup-list li').length === {i}")
     check("første opvarmningshal er prioritetshal fra start",
           page.evaluate("() => STATE.priorityHall") == "Varm 1"
-          and "Efterskoler først" in page.locator("#onb-warmup-list li").first.inner_text())
+          and "Efterskolernes hal" in page.locator("#onb-warmup-list li").first.inner_text())
     page.locator("#onb-warmup-list li").nth(1).locator(".star").click()
     page.wait_for_function("() => STATE.priorityHall === 'Varm 2'")
-    check("stjernen gør en anden hal til prioritetshal", "Efterskoler først" in page.locator("#onb-warmup-list li").nth(1).inner_text())
+    check("stjernen gør en anden hal til prioritetshal", "Efterskolernes hal" in page.locator("#onb-warmup-list li").nth(1).inner_text())
     page.locator("#onb-warmup-list li").first.locator(".star").click()
     page.wait_for_function("() => STATE.priorityHall === 'Varm 1'")
     first = page.locator("#onb-show-list li").first
@@ -418,6 +418,42 @@ def solve_hall_tests(page, tmp):
     refresh(page)
 
 
+def program_move_tests(page, tmp):
+    """For tæt i programmet: Find løsning foreslår et nyt tidspunkt."""
+    api(page, "POST", "/api/reset")
+    for hal in ("Varm 1", "Varm 2"):
+        api(page, "POST", "/api/halls/warmup", {"name": hal})
+    for sal, start in (("Sal A", "14:00"), ("Sal B", "13:30")):
+        api(page, "POST", "/api/halls/show", {"name": sal})
+        api(page, "POST", "/api/halls/show/starttime", {"name": sal, "startTime": start})
+    refresh(page)
+    for sal, teams, name in (("Sal A", ["A Efterskole"], "a"), ("Sal B", [("X1", 20), ("X2", 20), ("B Efterskole", 20), ("X3", 20), ("X4", 20)], "b")):
+        path = Path(tmp) / f"pm_{name}.xlsx"
+        path.write_bytes(excel_bytes(teams))
+        page.evaluate("(h) => { uploadTarget = h; fileHandler = null; }", sal)
+        page.set_input_files("#file-input", str(path))
+        page.wait_for_function(f"() => STATE.rows.some(r => r.opvisningHal === '{sal}')")
+    for r in page.evaluate("() => STATE.rows.map(r => [r.id, r.hold])"):
+        api(page, "PATCH", f"/api/rows/{r[0]}", {"field": "opvarmningHal", "value": "Varm 1" if "Efterskole" in r[1] else "Varm 2"})
+    refresh(page)
+    page.click(".rail-link[data-view=oversigt]")
+    page.click("#problem-banner")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    text = page.inner_text("#solve-result")
+    check("Find løsning siger, at holdene ligger for tæt, og foreslår et nyt tidspunkt",
+          "B Efterskole går på for tæt på A Efterskole til, at begge kan varme op i Varm 1" in text
+          and "fra 14:10 til 14:30 (efter X3)" in text, text)
+    page.click("#solve-result >> text=Flyt i programmet")
+    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'B Efterskole').status === 'OK'")
+    b = page.evaluate("() => STATE.rows.find(r => r.hold === 'B Efterskole')")
+    check("Flyt i programmet flytter holdet og giver det plads", (b["opvisningTid"], b["status"]) == ("14:30", "OK"), b)
+    for sal in ("Sal B",):
+        api(page, "DELETE", "/api/halls/show", {"name": sal})
+    api(page, "DELETE", "/api/halls/warmup", {"name": "Varm 2"})
+    api(page, "POST", "/api/halls/show/starttime", {"name": "Sal A", "startTime": "09:00"})
+    refresh(page)
+
+
 def drop_files(page, selector, files):
     """Slipper filer fra 'computeren' på elementet. files: [(navn, bytes)]."""
     import base64
@@ -673,6 +709,7 @@ def run(mode):
             bulk_tests(page, dialogs)
             solve_tests(page, tmp)
             solve_hall_tests(page, tmp)
+            program_move_tests(page, tmp)
             drop_tests(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))
