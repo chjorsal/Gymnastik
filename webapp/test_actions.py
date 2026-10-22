@@ -410,6 +410,23 @@ def run():
                                                                           for r in kp["raw_rows"]]})))
     check("plans saved before comments existed still work", all(r["kommentar"] is None for r in actions.payload(old_plan)["rows"]))
 
+    # ---------- et hold med en forening er altid et hold ----------
+    buf = BytesIO()
+    pd.DataFrame({"Tid": ["09:00", "", "", ""], "Varighed": [10, 10, 10, 10],
+                  "Forening": ["HI Skanderborg - Højvangens Idrætsforening", "Pause", "Velkomst", ""],
+                  "Holdnavn": ["Opvisning & TeamGym", "Pause", "Velkomst", "Tak for i dag"],
+                  "Antal deltagere": [29, None, 150, None]}).to_excel(buf, index=False)
+    tp = actions.start_plan()
+    actions.upload(tp, [("t.xlsx", buf.getvalue())], show_hal="Hal 1")
+    types = {r["hold"]: (r["type"], r["needsWarmup"]) for r in actions.payload(tp)["rows"]}
+    check("'Opvisning & TeamGym' from a club is a team that warms up; pause/velkomst/tak are not",
+          types == {"Opvisning & TeamGym": ("hold", True), "Pause": ("pause", False),
+                    "Velkomst": ("andet", False), "Tak for i dag": ("andet", False)}, types)
+    team_id = next(r["id"] for r in tp["raw_rows"] if r["Hold"] == "Opvisning & TeamGym")
+    check("its name comes from Excel and cannot be edited", raises(lambda: actions.patch_row(tp, team_id, "hold", "X"), 400) is not None)
+    check("it stays a team after saving and opening the plan",
+          next(r for r in actions.migrate(json.loads(json.dumps(tp)))["raw_rows"] if r["id"] == team_id)["Type"] == "hold")
+
     # ---------- eksporten må aldrig indeholde formler ----------
     import openpyxl
     fp = actions.start_plan()

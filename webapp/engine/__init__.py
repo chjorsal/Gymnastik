@@ -25,6 +25,7 @@ from .importer import build_dataframe, clean_hal_name, load_excel_bytes, new_row
 from .placement import Booking, compute_plan, overlaps, try_place, try_place_fixed
 from .rules import (
     classify_type,
+    is_team_by_forening,
     gang_tid,
     opvarmning_minutter,
     priority_rank,

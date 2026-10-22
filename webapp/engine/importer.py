@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 import pandas as pd
 
 from .config import DEFAULT_VARIGHED, TYPE_LABELS
-from .rules import classify_type, read_holdtype
+from .rules import classify_type, is_team_by_forening, read_holdtype
 from .values import clean_str, new_id, none_if_missing, parse_clock, to_clock
 
 
@@ -65,6 +65,8 @@ def load_excel_bytes(filename: str, content: bytes, show_hal: str, start_order: 
         alder_raw = none_if_missing(r.get("Alder"))
 
         row_type = classify_type(hold)
+        if row_type != "hold" and is_team_by_forening(holdnavn, forening):
+            row_type = "hold"
         if row_type in TYPE_LABELS and not hold:
             # Kun de kendte, navngivne typer (pause/fane osv.) får en
             # synlig standard-label. "andet" er den tvetydige gruppe (tom
@@ -85,6 +87,7 @@ def load_excel_bytes(filename: str, content: bytes, show_hal: str, start_order: 
             AlderRaw=None if alder_raw is None else str(alder_raw),
             # holdets ønsker og bemærkninger (kontaktperson og e-mail læses ikke ind)
             Kommentar=clean_str(r.get("Kommentar")) or None,
+            Forening=forening or None,
         ))
         order += 1
     return rows, suggested_start

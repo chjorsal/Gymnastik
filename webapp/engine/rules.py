@@ -16,6 +16,15 @@ def classify_type(hold_text) -> str:
     return "hold"
 
 
+def is_team_by_forening(hold, forening) -> bool:
+    """Et hold med en forening, der ikke bare gentager navnet, er altid et
+    hold — også når navnet indeholder et ord som "Opvisning" ("Opvisning &
+    TeamGym" fra HI Skanderborg). Programpunkter har ingen forening eller
+    samme tekst i begge kolonner ("Pause" / "Pause")."""
+    h, f = clean_str(hold).lower(), clean_str(forening).lower()
+    return bool(h and f and h != f)
+
+
 def read_holdtype(value) -> str:
     val = clean_str(value).lower()
     if val == "dans":
