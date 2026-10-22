@@ -68,6 +68,16 @@ def _style_hal_sheet(ws) -> None:
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 3, 40)
 
 
+def _text_not_formulas(ws) -> None:
+    """Holdnavne og kommentarer kommer fra foreningerne. En tekst, der starter
+    med "=", ville openpyxl ellers gemme som en formel, som Excel kører, når
+    filen åbnes (fx =HYPERLINK(...)). Gem al sådan tekst som almindelig tekst."""
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.data_type == "f" or (isinstance(cell.value, str) and cell.value.startswith("=")):
+                cell.data_type = "s"
+
+
 def _style_output_sheet(ws) -> None:
     """Farver hver række i Output-arket efter dens status."""
     status_col = next((cell.column for cell in ws[1] if cell.value == "Status"), None)
@@ -131,6 +141,8 @@ def build_workbook(df_all: pd.DataFrame, show_halls: Optional[List[str]] = None)
             _style_hal_sheet(writer.sheets[sheet_name])
 
         _style_output_sheet(writer.sheets["Output"])
+        for ws in writer.sheets.values():
+            _text_not_formulas(ws)
 
     buf.seek(0)
     return buf
