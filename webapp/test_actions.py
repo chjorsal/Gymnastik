@@ -410,6 +410,26 @@ def run():
                                                                           for r in kp["raw_rows"]]})))
     check("plans saved before comments existed still work", all(r["kommentar"] is None for r in actions.payload(old_plan)["rows"]))
 
+    # ---------- eksporten må aldrig indeholde formler ----------
+    import openpyxl
+    fp = actions.start_plan()
+    src = openpyxl.Workbook()
+    for r, values in enumerate([["Tid", "Varighed", "Holdnavn", "Kommentar"],
+                                ["09:00", 10, "=1+1", '=HYPERLINK("http://example.invalid","klik")'],
+                                ["", 10, "Ok hold", "+ekstra -minus @at"]], start=1):
+        for c, value in enumerate(values, start=1):
+            src.active.cell(r, c, value).data_type = "s" if isinstance(value, str) else "n"
+    buf = BytesIO()
+    src.save(buf)
+    actions.upload(fp, [("f.xlsx", buf.getvalue())], show_hal="Hal 1")
+    wb = openpyxl.load_workbook(BytesIO(actions.export_xlsx(fp)))
+    cells = [c for ws in wb.worksheets for row in ws.iter_rows() for c in row if isinstance(c.value, str)]
+    check("names and comments starting with '=' are exported as text, never as formulas",
+          not any(c.data_type == "f" for c in cells)
+          and any(c.value == '=HYPERLINK("http://example.invalid","klik")' for c in cells)
+          and any(c.value == "=1+1" for c in cells),
+          [(c.value, c.data_type) for c in cells if str(c.value).startswith(("=", "+"))])
+
     # ---------- omdøb haller: navne skal være unikke ----------
     rp = plan_with_halls()
     actions.upload(rp, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal A")
