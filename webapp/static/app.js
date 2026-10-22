@@ -855,9 +855,11 @@ function renderSolveResult() {
       li.textContent = `${where(m)}: varmer op i ${m.toHal}`;
       ul.appendChild(li);
     });
-    earlier.forEach((e) => {
+    earlier.filter((e) => e.changed).forEach((e) => {
       const li = document.createElement("li");
-      li.textContent = `${where(e)}: varmer op ${e.toStart}–${e.toEnd} i stedet for ${e.fromStart}–${e.fromEnd}`;
+      li.textContent = e.fromStart
+        ? `${where(e)}: varmer op ${e.toStart}–${e.toEnd} i stedet for ${e.fromStart}–${e.fromEnd}`
+        : `${where(e)}: varmer op ${e.toStart}–${e.toEnd} i ${e.hal}`;
       ul.appendChild(li);
     });
     changes.forEach((c) => {
@@ -1043,8 +1045,10 @@ function renderTimeline(teams) {
         end: Math.min(r.opvarmningSlutMin, DAY_END),
         color: halColor(r.opvisningHal),
         extraClass: r.opvarmningStartOverride ? "pinned" : "",
-        title: `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`,
+        title: `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`
+          + "\nTræk for at flytte opvarmningen",
         onClick: open,
+        dragId: r.id,
       });
     });
   });
@@ -1188,6 +1192,41 @@ function buildMoveHalSelect(row) {
   return moveSelect;
 }
 
+// Opvarmningens starttid, som man selv kan rette ("10:31" = 5 min tidligere
+// end 10:36). Pil op/ned flytter 1 minut. Siden tjekker med det samme og
+// siger til, hvis tiden overlapper et andet hold eller bryder reglerne;
+// ellers får holdet en fast tid.
+function buildStartInput(row) {
+  const wrap = document.createElement("span");
+  wrap.className = "warmup-time";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.inputMode = "numeric";
+  input.className = "form-control form-control-sm cell-input warmup-start-input";
+  input.value = row.opvarmningStart;
+  input.title = "Opvarmningen starter kl. … — skriv en anden tid, eller brug pil op og ned";
+  input.setAttribute("aria-label", `Opvarmningen starter, ${row.hold}`);
+  input.dataset.focusKey = `warmup-start:${row.id}`;
+  const place = (start) => update(apiJSON(`/api/rows/${encodeURIComponent(row.id)}/place`, "POST",
+    { hal: row.opvarmningHalBeregnet, start }));
+  input.addEventListener("change", () => {
+    if (input.value.trim() && input.value.trim() !== row.opvarmningStart) place(input.value.trim());
+    else input.value = row.opvarmningStart;
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const [h, m] = row.opvarmningStart.split(":").map(Number);
+    input.value = fmtMinutes(h * 60 + m + (e.key === "ArrowUp" ? 1 : -1));
+    place(input.value);
+  });
+  const end = document.createElement("span");
+  end.className = "warmup-end";
+  end.textContent = `–${row.opvarmningSlut}`;
+  wrap.append(input, end);
+  return wrap;
+}
+
 // De sidste tre celler, som begge opvarmningstabeller har.
 function appendWarmupCells(tr, row) {
   tr.append(
@@ -1248,7 +1287,7 @@ function renderWarmupTable() {
       return swapWarmupTime(draggedId, row.id);
     });
 
-    const tdTime = readonlyCell(`${row.opvarmningStart}–${row.opvarmningSlut}`, "narrow-col warmup-time");
+    const tdTime = cell(buildStartInput(row), "warmup-time-col");
     const pin = buildPinNote(row);
     if (pin) tdTime.appendChild(pin);
     const holdText = dragHandleText(row.hold);

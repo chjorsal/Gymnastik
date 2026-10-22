@@ -378,6 +378,11 @@ td.narrow-col .form-select.cell-input { min-width: 140px; }
 .cell-input.form-control:focus, .cell-input.form-select:focus { border-color: var(--accent); }
 td.readonly { color: var(--slate); }
 td.warmup-col { white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.warmup-time-col { width: 150px; white-space: nowrap; }
+.warmup-time { display: inline-flex; align-items: center; gap: 2px; font-variant-numeric: tabular-nums; font-weight: 650; }
+.warmup-start-input { width: 70px !important; min-width: 70px; text-align: center; }
+.warmup-end { color: var(--ink); }
+.tl-block[draggable="true"] { cursor: grab; }
 td.warmup-missing { color: var(--signal); font-weight: 700; }
 
 /* Træk-og-slip: rækken løfter sig, og en orange streg viser, hvor den lander. */

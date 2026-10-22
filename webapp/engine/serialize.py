@@ -18,7 +18,9 @@ def problem_message(status: str, warmup_halls: List[str]) -> str:
 
 def to_row_dicts(df: pd.DataFrame, warmup_halls: List[str]) -> List[dict]:
     out = []
-    for _, r in df.iterrows():
+    # to_dict("records") er mange gange hurtigere end iterrows — det betyder
+    # noget, fordi Find løsning regner planen om mange gange.
+    for r in df.to_dict("records"):
         out.append({
             "id": r["id"],
             "hold": r["Hold"],
