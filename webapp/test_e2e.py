@@ -454,7 +454,7 @@ def program_move_tests(page, tmp):
     refresh(page)
 
 
-def earlier_tests(page, tmp):
+def earlier_tests(page, tmp, dialogs):
     """Find løsning rykker et andet holds opvarmning tidligere (Brejninggaard)."""
     api(page, "POST", "/api/reset")
     for sal, start in (("Sal A", "11:06"), ("Sal B", "11:30")):
@@ -479,6 +479,26 @@ def earlier_tests(page, tmp):
     page.click("#solve-result >> text=Brug løsningen")
     page.wait_for_function("() => STATE.rows.every(r => r.status === 'OK')")
     check("Brug løsningen giver begge efterskoler plads", True)
+
+    # selv rette starttiden på Opvarmning-siden
+    page.click(".rail-link[data-view=opvarmning]")
+    field = page.locator(f"input[data-focus-key='warmup-start:{bid}']")
+    field.fill("10:28")
+    field.press("Enter")
+    page.wait_for_function(f"() => STATE.rows.find(r => r.id === '{bid}').opvarmningStart === '10:28'")
+    check("starttiden kan rettes direkte i feltet", page.evaluate(
+        f"() => STATE.rows.find(r => r.id === '{bid}').opvarmningSlut") == "10:53")
+    page.locator(f"input[data-focus-key='warmup-start:{bid}']").press("ArrowUp")
+    page.wait_for_function(f"() => STATE.rows.find(r => r.id === '{bid}').opvarmningStart === '10:29'")
+    check("pil op flytter starttiden 1 minut", True)
+    n = len(dialogs)
+    field = page.locator(f"input[data-focus-key='warmup-start:{bid}']")
+    field.fill("10:00")
+    field.press("Enter")
+    page.wait_for_timeout(500)
+    check("en starttid mere end 45 min før afvises med besked, intet ændres",
+          len(dialogs) > n and "45 min" in dialogs[-1]
+          and page.evaluate(f"() => STATE.rows.find(r => r.id === '{bid}').opvarmningStart") == "10:29", dialogs[-1:])
     for sal in ("Sal B",):
         api(page, "DELETE", "/api/halls/show", {"name": sal})
     api(page, "POST", "/api/halls/show/starttime", {"name": "Sal A", "startTime": "09:00"})
@@ -741,7 +761,7 @@ def run(mode):
             solve_tests(page, tmp)
             solve_hall_tests(page, tmp)
             program_move_tests(page, tmp)
-            earlier_tests(page, tmp)
+            earlier_tests(page, tmp, dialogs)
             drop_tests(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))

@@ -531,8 +531,12 @@ def _try_earlier_neighbour(work: dict, u: dict, views: dict, ok_now: set, halls:
     near = [v for v in views.values()
             if v["status"] == "OK" and v["id"] not in user_fixed and v["opvarmningHalBeregnet"] in halls
             and v["opvarmningStartMin"] < hi and v["opvarmningSlutMin"] > lo]
+    # Præcis den flytning, der giver u plads lige efter holdet (u så sent som
+    # muligt); ellers ingen. Kæder af flere hold klares af _try_repack.
+    u_latest_start = hi - _effective_minutes(u)
     options = sorted(
-        ((shift, v) for v in near for shift in range(1, v["opvarmningStartMin"] - _earliest_start(v) + 1)),
+        ((v["opvarmningSlutMin"] - u_latest_start, v) for v in near
+         if 0 < v["opvarmningSlutMin"] - u_latest_start <= v["opvarmningStartMin"] - _earliest_start(v)),
         key=lambda sv: sv[0])
     for shift, v in options:
         start = v["opvarmningStartMin"] - shift
@@ -547,15 +551,87 @@ def _try_earlier_neighbour(work: dict, u: dict, views: dict, ok_now: set, halls:
     return None
 
 
-def _try_shorter(work: dict, u: dict, views: dict, ok_now: set) -> Optional[dict]:
-    """Forkort holdet selv og holdene, der varmer op samtidig (ned til 10 min,
-    aldrig efterskoler eller DGI-hold). Små ændringer på få hold først."""
+REPACK_MAX_TEAMS = 12   # højst så mange hold i én kæde, der pakkes om
+
+
+def _hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _try_repack(work: dict, plan: dict, u: dict, views: dict, ok_now: set, hal: str,
+                time_fixed: set) -> Optional[dict]:
+    """Pak holdene i hallen bagfra. Kæden er holdet uden plads plus de hold,
+    der KUN kan være i hallen (efterskoler i efterskolernes hal og hold låst
+    til hallen) og hvis tidsrum hænger sammen med det. Det hold, der går senest
+    på, lægges så sent som muligt; det næste så sent som muligt, men før det
+    forrige — osv. (findes der en plads til alle, finder den den). Hold med en
+    fast tid, som brugeren selv har sat, står fast; kæden lægges uden om dem.
+    Almindelige hold i hallen finder selv en anden hal, når planen regnes om."""
+    eft_hall = _efterskole_hall(plan)
+
+    def bound(v):
+        lock = engine.override_str(_find_row(work, v["id"]).get("OpvarmningHalOverride"))
+        if v["holdtype"] == "efterskole":
+            return hal == eft_hall
+        return lock == hal
+
+    def window(v):
+        return _earliest_start(v), v["opvisningMin"] - engine.GANG_MIN
+
+    obstacles = sorted((v["opvarmningStartMin"], v["opvarmningSlutMin"]) for v in views.values()
+                       if v["status"] == "OK" and v["opvarmningHalBeregnet"] == hal and v["id"] in time_fixed)
+    candidates = [v for v in views.values()
+                  if v["status"] == "OK" and v["opvarmningHalBeregnet"] == hal and v["id"] not in time_fixed
+                  and v["id"] != u["id"] and bound(v)]
+    chain, (lo, hi) = [u], window(u)
+    grew = True
+    while grew and len(chain) < REPACK_MAX_TEAMS:
+        grew = False
+        for v in candidates:
+            w0, w1 = window(v)
+            if v not in chain and w0 < hi and w1 > lo:
+                chain.append(v)
+                lo, hi = min(lo, w0), max(hi, w1)
+                grew = True
+    if len(chain) < 2:
+        return None
+
+    plan_times, cursor = {}, None
+    for v in sorted(chain, key=lambda v: (window(v)[1], v["opvisningMin"]), reverse=True):
+        earliest, end = window(v)
+        if cursor is not None:
+            end = min(end, cursor)
+        warm = _effective_minutes(v)
+        moved = True
+        while moved:   # uden om faste tider
+            moved = False
+            for a, b in obstacles:
+                if end - warm < b and a < end:
+                    end, moved = a, True
+        if end - warm < earliest:
+            return None
+        plan_times[v["id"]] = end - warm
+        cursor = end - warm
+
+    def change(trial):
+        for rid, start in plan_times.items():
+            row = _find_row(trial, rid)
+            row["OpvarmningStartOverride"] = _hhmm(start)
+            row["OpvarmningHalOverride"] = hal
+    return _fits(work, u["id"], ok_now, change)
+
+
+def _try_shorter(work: dict, u: dict, views: dict, ok_now: set, halls: List[str]) -> Optional[dict]:
+    """Forkort holdet selv og holdene, der varmer op samtidig i de haller,
+    holdet kan bruge (ned til 10 min, aldrig efterskoler eller DGI-hold).
+    Små ændringer på få hold først."""
     latest = u["opvisningMin"] - engine.gang_tid()
-    window = (latest - engine.MAX_EARLY_TOTAL_MIN - _effective_minutes(u), latest)
+    window = (max(latest - engine.MAX_EARLY_TOTAL_MIN - _effective_minutes(u),
+                  u["opvisningMin"] - engine.MAX_START_BEFORE_MIN), latest)
     centre = sum(window) / 2
     neighbours = sorted(
         (v for v in views.values()
-         if v["status"] == "OK" and v["holdtype"] not in PROTECTED_TYPES
+         if v["status"] == "OK" and v["holdtype"] not in PROTECTED_TYPES and v["opvarmningHalBeregnet"] in halls
          and v["opvarmningStartMin"] < window[1] and v["opvarmningSlutMin"] > window[0]),
         key=lambda v: abs((v["opvarmningStartMin"] + v["opvarmningSlutMin"]) / 2 - centre),
     )[:SOLVE_MAX_NEIGHBOURS]
@@ -610,11 +686,15 @@ def _program_move(plan: dict, views: dict, u: dict) -> Optional[dict]:
     ok_now = _ok_ids(views)
     sides = {rid: _after_one(views[rid]["opvisningMin"]) for rid in order}
     rest = [rid for rid in order if rid != u["id"]]
-    best = None
-    for pos in range(len(order)):
+    current = order.index(u["id"])
+    # nærmeste pladser først; den første, der virker, er den mindste flytning
+    for pos in sorted(range(len(order)), key=lambda pos: (abs(pos - current), pos)):
         new = rest[:pos] + [u["id"]] + rest[pos:]
         if new == order:
             continue
+        if _after_one(views[u["id"]]["opvisningMin"]) != _after_one(
+                views[order[pos if pos < current else pos]]["opvisningMin"]):
+            continue   # holdet ville skifte side af kl. 13
         trial = copy.deepcopy(plan)
         reorder_rows(trial, hal, new)
         after = _views(trial)
@@ -622,12 +702,9 @@ def _program_move(plan: dict, views: dict, u: dict) -> Optional[dict]:
             continue
         if any(_after_one(after[rid]["opvisningMin"]) != sides[rid] for rid in order):
             continue
-        shift = abs(after[u["id"]]["opvisningMin"] - u["opvisningMin"])
-        if best is None or shift < best[0]:
-            best = (shift, new, after)
-    if best is None:
+        break
+    else:
         return None
-    _, new, after = best
     i = new.index(u["id"])
     return {"id": u["id"], "hold": u["hold"], "opvisningHal": hal,
             "fromTid": u["opvisningTid"], "toTid": after[u["id"]]["opvisningTid"],
@@ -651,6 +728,9 @@ def solve_warmups(plan: dict) -> dict:
     raw_before = {r["id"]: r for r in plan["raw_rows"]}
     user_fixed = {r["id"] for r in plan["raw_rows"]
                   if engine.override_str(r.get("OpvarmningHalOverride")) or engine.override_str(r.get("OpvarmningStartOverride"))}
+    # Hold med en tid, brugeren selv har sat, rykkes aldrig i tid. (Hold, der
+    # kun er låst til en hal, må gerne rykkes — de bliver i hallen.)
+    time_fixed = {r["id"] for r in plan["raw_rows"] if engine.override_str(r.get("OpvarmningStartOverride"))}
     progress = True
     tried_without_luck = set()
     while progress:
@@ -670,9 +750,14 @@ def solve_warmups(plan: dict) -> dict:
             if trial is None:
                 locked = engine.override_str(_find_row(work, u["id"]).get("OpvarmningHalOverride"))
                 halls = [locked] if locked in plan["warmup_halls"] and u["holdtype"] != "efterskole" else _halls_for(plan, u)
-                trial = _try_earlier_neighbour(work, u, views, ok_now, halls, user_fixed)
+                trial = _try_earlier_neighbour(work, u, views, ok_now, halls, time_fixed)
             if trial is None:
-                trial = _try_shorter(work, u, views, ok_now)
+                for hal in halls:
+                    trial = _try_repack(work, plan, u, views, ok_now, hal, time_fixed)
+                    if trial:
+                        break
+            if trial is None:
+                trial = _try_shorter(work, u, views, ok_now, halls)
             if trial is None:
                 tried_without_luck.add(u["id"])
                 continue
@@ -690,9 +775,13 @@ def solve_warmups(plan: dict) -> dict:
             changes.append({**where, "from": before, "to": after})
         new_start = engine.override_str(row.get("OpvarmningStartOverride"))
         if new_start and new_start != engine.override_str(raw_before[rid].get("OpvarmningStartOverride")):
+            # "changed": false = tiden er den samme, men holdet låses, så
+            # kæden holder (vises ikke, men kommer med i Brug løsningen)
             earlier.append({**where, "hal": v["opvarmningHalBeregnet"], "start": new_start,
                             "fromStart": original[rid]["opvarmningStart"], "fromEnd": original[rid]["opvarmningSlut"],
-                            "toStart": v["opvarmningStart"], "toEnd": v["opvarmningSlut"]})
+                            "toStart": v["opvarmningStart"], "toEnd": v["opvarmningSlut"],
+                            "changed": (original[rid]["opvarmningStart"], original[rid]["opvarmningHalBeregnet"])
+                            != (v["opvarmningStart"], v["opvarmningHalBeregnet"])})
             continue
         new_hal = engine.override_str(row.get("OpvarmningHalOverride"))
         if new_hal and new_hal != engine.override_str(raw_before[rid].get("OpvarmningHalOverride")):

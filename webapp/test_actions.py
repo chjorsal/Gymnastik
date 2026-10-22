@@ -307,6 +307,44 @@ def run():
     check("apply_solution rejects a bad start time",
           raises(lambda: actions.apply_solution(en, [{"id": ids["Brejninggaard Efterskole"], "start": "kl. 25"}]), 400) is not None)
 
+    # ---------- pak holdene i hallen bagfra (to hold skal rykkes) ----------
+    def chain_case(before_team, lock_before):
+        p = actions.new_plan()
+        actions.create_warmup_hall(p, "Hal 4")
+        actions.create_warmup_hall(p, "Hal 3 A")
+        for sal, team, start in (("S1", before_team, "10:40"), ("Arena", "Brejninggaard Efterskole", "11:06"),
+                                 ("Hal 2", "Vesterbølle Efterskole", "11:30")):
+            actions.create_show_hall(p, sal)
+            actions.set_show_hall_start_time(p, sal, start)
+            actions.upload(p, [("d.xlsx", excel_bytes([team]))], show_hal=sal)
+        if lock_before:
+            actions.patch_row(p, p["raw_rows"][0]["id"], "opvarmningHal", "Hal 4")
+        return p
+    for before_team, lock, label in (("Almindeligt hold", True, "a team locked to the hall"),
+                                     ("Testby Efterskole", False, "another efterskole")):
+        cp = chain_case(before_team, lock)
+        before_views = {r["id"]: r for r in actions.payload(cp)["rows"]}
+        missing = [r["hold"] for r in before_views.values() if r["status"] != "OK"]
+        sol = actions.solve_warmups(cp)
+        actions.apply_solution(cp, [{"id": e["id"], "hal": e["hal"], "start": e["start"]} for e in sol["earlier"]]
+                               + [{"id": c["id"], "minutes": c["to"]} for c in sol["changes"]])
+        rows = actions.payload(cp)["rows"]
+        check(f"repack: with {label} just before, all three get room in Hal 4 without shorter warm-ups",
+              missing and sol["remaining"] == [] and sol["changes"] == []
+              and all(r["status"] == "OK" and r["opvarmningHalBeregnet"] == "Hal 4" for r in rows),
+              (missing, sol, [(r["hold"], r["status"], r["opvarmningStart"]) for r in rows]))
+        check(f"repack keeps the rules ({label}): start ≤ 45 min before, end ≥ 5 min before",
+              all(r["opvisningMin"] - r["opvarmningStartMin"] <= 45 and r["opvisningMin"] - r["opvarmningSlutMin"] >= 5
+                  for r in rows))
+        check(f"repack marks a team 'changed' only when its time or hall changes ({label})",
+              all(e["changed"] == ((e["fromStart"], before_views[e["id"]]["opvarmningHalBeregnet"]) != (e["toStart"], e["hal"]))
+                  for e in sol["earlier"]), sol["earlier"])
+    # en tid, brugeren selv har sat, rykkes aldrig
+    cp = chain_case("Testby Efterskole", False)
+    actions.patch_row(cp, cp["raw_rows"][0]["id"], "opvarmningStart", "10:05")
+    sol = actions.solve_warmups(cp)
+    check("repack never moves a time the user set", all(e["hold"] != "Testby Efterskole" for e in sol["earlier"]), sol["earlier"])
+
     # ---------- for tæt i programmet: forslag om at flytte holdet ----------
     # To efterskoler låst til V1, begge med 30 min: A går på 14:00, B 14:10 —
     # for tæt til at begge kan varme op i V1. B kan flyttes i Sal 2 til 14:30.
