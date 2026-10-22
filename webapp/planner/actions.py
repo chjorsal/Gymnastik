@@ -512,6 +512,41 @@ def _try_other_halls(work: dict, u: dict, ok_now: set, halls: List[str]) -> Opti
     return None
 
 
+def _earliest_start(v: dict) -> int:
+    """Det tidligste, holdets opvarmning må starte (minutter fra dagens start):
+    højst 45 min før det går på, og højst 30 min ventetid efter opvarmningen."""
+    warm = _effective_minutes(v)
+    return max(v["opvisningMin"] - engine.MAX_START_BEFORE_MIN,
+               v["opvisningMin"] - engine.GANG_MIN - engine.MAX_EARLY_TOTAL_MIN - warm)
+
+
+def _try_earlier_neighbour(work: dict, u: dict, views: dict, ok_now: set, halls: List[str],
+                           user_fixed: set) -> Optional[dict]:
+    """Ryk ét af holdene, der varmer op i u's tidsrum, lidt tidligere (inden
+    for dets egne grænser), så der bliver et hul til u. Siden lægger ellers
+    altid opvarmningen så sent som muligt. Det hold, der rykkes, får en fast
+    tid; ingen kortere opvarmning. Mindste flytning først."""
+    lo = u["opvisningMin"] - engine.MAX_START_BEFORE_MIN
+    hi = u["opvisningMin"] - engine.GANG_MIN
+    near = [v for v in views.values()
+            if v["status"] == "OK" and v["id"] not in user_fixed and v["opvarmningHalBeregnet"] in halls
+            and v["opvarmningStartMin"] < hi and v["opvarmningSlutMin"] > lo]
+    options = sorted(
+        ((shift, v) for v in near for shift in range(1, v["opvarmningStartMin"] - _earliest_start(v) + 1)),
+        key=lambda sv: sv[0])
+    for shift, v in options:
+        start = v["opvarmningStartMin"] - shift
+
+        def change(trial, v=v, start=start):
+            row = _find_row(trial, v["id"])
+            row["OpvarmningStartOverride"] = f"{start // 60:02d}:{start % 60:02d}"
+            row["OpvarmningHalOverride"] = v["opvarmningHalBeregnet"]
+        trial = _fits(work, u["id"], ok_now, change)
+        if trial:
+            return trial
+    return None
+
+
 def _try_shorter(work: dict, u: dict, views: dict, ok_now: set) -> Optional[dict]:
     """Forkort holdet selv og holdene, der varmer op samtidig (ned til 10 min,
     aldrig efterskoler eller DGI-hold). Små ændringer på få hold først."""
@@ -601,8 +636,9 @@ def _program_move(plan: dict, views: dict, u: dict) -> Optional[dict]:
 
 def solve_warmups(plan: dict) -> dict:
     """Prøver at give hold uden plads en opvarmning. For hvert hold, efter
-    opvisningstid: først en anden hal (koster ingen minutter), så kortere
-    opvarmning til holdet og holdene omkring det. Ingen andre hold må miste
+    opvisningstid: først en anden hal (koster ingen minutter), så at rykke et
+    andet holds opvarmning tidligere, så kortere opvarmning til holdet og
+    holdene omkring det. Ingen andre hold må miste
     deres plads, og der regnes forfra efter hver løsning.
 
     Hold, som brugeren selv har lagt i en hal eller på et tidspunkt, flyttes
@@ -628,8 +664,13 @@ def solve_warmups(plan: dict) -> dict:
         )
         for u in unplaced:
             trial = None
-            if u["id"] not in user_fixed:
+            # (efterskoler har kun én hal — dér er "en anden hal" ingen løsning)
+            if u["id"] not in user_fixed and u["holdtype"] != "efterskole":
                 trial = _try_other_halls(work, u, ok_now, _halls_for(plan, u))
+            if trial is None:
+                locked = engine.override_str(_find_row(work, u["id"]).get("OpvarmningHalOverride"))
+                halls = [locked] if locked in plan["warmup_halls"] and u["holdtype"] != "efterskole" else _halls_for(plan, u)
+                trial = _try_earlier_neighbour(work, u, views, ok_now, halls, user_fixed)
             if trial is None:
                 trial = _try_shorter(work, u, views, ok_now)
             if trial is None:
@@ -640,13 +681,19 @@ def solve_warmups(plan: dict) -> dict:
             break   # regn forfra efter hver løsning
 
     final = _views(work)
-    changes, moves = [], []
+    changes, moves, earlier = [], [], []
     for row in work["raw_rows"]:
         rid, v = row["id"], final[row["id"]]
         where = {"id": rid, "hold": v["hold"], "opvisningHal": v["opvisningHal"], "opvisningTid": v["opvisningTid"]}
         before, after = _effective_minutes(original[rid]), _effective_minutes(v)
         if before != after:
             changes.append({**where, "from": before, "to": after})
+        new_start = engine.override_str(row.get("OpvarmningStartOverride"))
+        if new_start and new_start != engine.override_str(raw_before[rid].get("OpvarmningStartOverride")):
+            earlier.append({**where, "hal": v["opvarmningHalBeregnet"], "start": new_start,
+                            "fromStart": original[rid]["opvarmningStart"], "fromEnd": original[rid]["opvarmningSlut"],
+                            "toStart": v["opvarmningStart"], "toEnd": v["opvarmningSlut"]})
+            continue
         new_hal = engine.override_str(row.get("OpvarmningHalOverride"))
         if new_hal and new_hal != engine.override_str(raw_before[rid].get("OpvarmningHalOverride")):
             moves.append({**where, "toHal": new_hal})
@@ -687,6 +734,7 @@ def solve_warmups(plan: dict) -> dict:
     return {
         "changes": sorted(changes, key=order),
         "moves": sorted(moves, key=order),
+        "earlier": sorted(earlier, key=order),
         "placed": [v["hold"] for v in was_unplaced if final[v["id"]]["status"] == "OK"],
         "remaining": [v["hold"] for v in remaining],
         "hints": hints,
@@ -716,6 +764,11 @@ def apply_solution(plan: dict, changes: List[dict]) -> None:
             if c["hal"] not in plan["warmup_halls"]:
                 raise ActionError("Opvarmningshallen findes ikke længere — find løsningen igen")
             todo.append((row, "OpvarmningHalOverride", c["hal"]))
+        if "start" in c:
+            start = normalize_hhmm(c["start"])
+            if start is None:
+                raise ActionError("Ugyldigt tidspunkt i løsningen — find løsningen igen")
+            todo.append((row, "OpvarmningStartOverride", start))
     for row, key, value in todo:
         row[key] = value
 

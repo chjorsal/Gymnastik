@@ -454,6 +454,37 @@ def program_move_tests(page, tmp):
     refresh(page)
 
 
+def earlier_tests(page, tmp):
+    """Find løsning rykker et andet holds opvarmning tidligere (Brejninggaard)."""
+    api(page, "POST", "/api/reset")
+    for sal, start in (("Sal A", "11:06"), ("Sal B", "11:30")):
+        api(page, "POST", "/api/halls/show", {"name": sal})
+        api(page, "POST", "/api/halls/show/starttime", {"name": sal, "startTime": start})
+    refresh(page)
+    for sal, team in (("Sal A", "Brejninggaard Efterskole"), ("Sal B", "Vesterbølle Efterskole")):
+        path = Path(tmp) / f"tidl_{sal[-1]}.xlsx"
+        path.write_bytes(excel_bytes([team]))
+        page.evaluate("(h) => { uploadTarget = h; fileHandler = null; }", sal)
+        page.set_input_files("#file-input", str(path))
+        page.wait_for_function(f"() => STATE.rows.some(r => r.opvisningHal === '{sal}')")
+    bid = page.evaluate("() => STATE.rows.find(r => r.hold.startsWith('Brejning')).id")
+    api(page, "PATCH", f"/api/rows/{bid}", {"field": "opvarmningMin", "value": 25})
+    refresh(page)
+    page.click(".rail-link[data-view=oversigt]")
+    page.click("#problem-banner")
+    page.wait_for_selector("#solve-result .solve-actions", timeout=120_000)
+    text = page.inner_text("#solve-result")
+    check("Find løsning foreslår at rykke et andet holds opvarmning tidligere",
+          "Brejninggaard Efterskole (går på 11:06 i Sal A): varmer op 10:30–10:55 i stedet for 10:36–11:01" in text, text)
+    page.click("#solve-result >> text=Brug løsningen")
+    page.wait_for_function("() => STATE.rows.every(r => r.status === 'OK')")
+    check("Brug løsningen giver begge efterskoler plads", True)
+    for sal in ("Sal B",):
+        api(page, "DELETE", "/api/halls/show", {"name": sal})
+    api(page, "POST", "/api/halls/show/starttime", {"name": "Sal A", "startTime": "09:00"})
+    refresh(page)
+
+
 def drop_files(page, selector, files):
     """Slipper filer fra 'computeren' på elementet. files: [(navn, bytes)]."""
     import base64
@@ -710,6 +741,7 @@ def run(mode):
             solve_tests(page, tmp)
             solve_hall_tests(page, tmp)
             program_move_tests(page, tmp)
+            earlier_tests(page, tmp)
             drop_tests(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))
