@@ -207,6 +207,20 @@ def _next_order(plan: dict, hal_name: str) -> int:
     return (max(orders) + 1) if orders else 0
 
 
+def _efterskole_hall(plan: dict) -> Optional[str]:
+    """Efterskolernes hal: hallen med stjernen (ellers den første)."""
+    if plan["priority_hall"] in plan["warmup_halls"]:
+        return plan["priority_hall"]
+    return plan["warmup_halls"][0] if plan["warmup_halls"] else None
+
+
+def _is_efterskole(row: dict) -> bool:
+    """Som motoren afgør det: Holdtype-kolonnen eller 'efterskole' i navnet."""
+    return engine.read_holdtype(row.get("HoldtypeRaw")) == "efterskole" or (
+        engine.read_holdtype(row.get("HoldtypeRaw")) == "ukendt"
+        and any(w in str(row.get("Hold") or "").lower() for w in ("efterskole", "akademiet")))
+
+
 def _find_row(plan: dict, row_id: str) -> Optional[dict]:
     return next((r for r in plan["raw_rows"] if r["id"] == row_id), None)
 
@@ -316,6 +330,9 @@ def patch_row(plan: dict, row_id: str, field: str, value=None) -> None:
     if key == "OpvarmningHalOverride":
         name = str(value or "").strip()
         value = name if name in plan["warmup_halls"] else None
+        if value and _is_efterskole(row) and value != _efterskole_hall(plan):
+            raise ActionError(f"Efterskoler varmer kun op i efterskolernes hal ({_efterskole_hall(plan)}). "
+                              "Flyt stjernen under Haller, hvis det skal være en anden hal")
     if key == "OpvarmningStartOverride":
         value = normalize_hhmm(value)
 
@@ -435,6 +452,8 @@ def place_warmup(plan: dict, row_id: str, hal: str, start: str) -> None:
         raise ActionError("Kun hold har opvarmning — pauser og andre programpunkter kan ikke placeres")
     if hal not in plan["warmup_halls"]:
         raise ActionError("Opvarmningshal ikke fundet")
+    if _is_efterskole(row) and hal != _efterskole_hall(plan):
+        raise ActionError(f"Efterskoler varmer kun op i efterskolernes hal ({_efterskole_hall(plan)})")
     start_n = normalize_hhmm(start)
     if start_n is None:
         raise ActionError(f"'{start}' er ikke et gyldigt klokkeslæt — skriv fx 09:30")
@@ -478,8 +497,8 @@ def _lock_to(team_id: str, hal: str):
 def _halls_for(plan: dict, v: dict) -> List[str]:
     """De haller holdet må varme op i: efterskoler kun i prioritetshallen."""
     if v["holdtype"] == "efterskole":
-        prio = plan["priority_hall"] if plan["priority_hall"] in plan["warmup_halls"] else None
-        return [prio or plan["warmup_halls"][0]] if plan["warmup_halls"] else []
+        hal = _efterskole_hall(plan)
+        return [hal] if hal else []
     return list(plan["warmup_halls"])
 
 
@@ -646,14 +665,21 @@ def solve_warmups(plan: dict) -> dict:
                 break
     # Hold, der stadig ikke kan få plads: ligger de for tæt på et andet hold i
     # programmet, foreslås et andet tidspunkt (beregnet på planen, som den er).
-    program_moves = []
+    program_moves, crowded = [], []
     hinted = {h["id"] for h in hints}
     for v in remaining:
         if v["id"] in hinted or len(program_moves) >= PROGRAM_MOVE_MAX_TEAMS or v["opvisningMin"] is None:
             continue
         move = _program_move(plan, original, original[v["id"]])
+        hal = engine.override_str(raw_before[v["id"]].get("OpvarmningHalOverride"))
+        if v["holdtype"] == "efterskole":
+            hal = _efterskole_hall(plan)
+        if not move:
+            by = _crowded_by(original, original[v["id"]], hal)
+            if by:   # ingen plads at flytte til — sig i det mindste hvorfor
+                crowded.append({"id": v["id"], "hold": v["hold"], "crowdedBy": by, "warmupHal": hal,
+                                "opvisningTid": v["opvisningTid"], "opvisningHal": v["opvisningHal"]})
         if move:
-            hal = engine.override_str(raw_before[v["id"]].get("OpvarmningHalOverride"))
             move["warmupHal"] = hal
             move["crowdedBy"] = _crowded_by(original, original[v["id"]], hal)
             program_moves.append(move)
@@ -665,6 +691,7 @@ def solve_warmups(plan: dict) -> dict:
         "remaining": [v["hold"] for v in remaining],
         "hints": hints,
         "programMoves": program_moves,
+        "crowded": crowded,
     }
 
 

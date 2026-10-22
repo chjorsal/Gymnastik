@@ -63,6 +63,9 @@ TYPE_KEYWORDS = [
     ("indmarch", "andet"),
     ("udmarch", "andet"),
     ("ikke hold", "andet"),
+    ("tak for", "andet"),          # "Tak for i dag"
+    ("afslutning", "andet"),
+    ("præmie", "andet"),
     # kun det selvstændige ord — ikke holdnavne som "Opvisningspiger"
     (r"\bopvisning\b", "andet"),
 ]
