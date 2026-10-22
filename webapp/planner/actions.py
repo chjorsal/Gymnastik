@@ -104,6 +104,8 @@ def migrate(data) -> dict:
     for row in data["raw_rows"]:
         if row.get("Type") in ("hold", "andet") and not row.get("HoldEdited") and not row.get("Manual"):
             reclassified = engine.classify_type(row.get("Hold", ""))
+            if reclassified != "hold" and engine.is_team_by_forening(row.get("Hold"), row.get("Forening")):
+                reclassified = "hold"
             if reclassified != row.get("Type"):
                 row["Type"] = reclassified
         row.pop("NeedsWarmup", None)
