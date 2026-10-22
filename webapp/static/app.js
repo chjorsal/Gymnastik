@@ -41,6 +41,7 @@ const ICONS = {
   starOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><line x1="12" y1="16" x2="12" y2="21"/></svg>',
+  comment: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/><line x1="8.5" y1="10.5" x2="15.5" y2="10.5"/><line x1="8.5" y1="14" x2="13" y2="14"/></svg>',
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>',
 };
 
@@ -1046,6 +1047,7 @@ function renderTimeline(teams) {
         color: halColor(r.opvisningHal),
         extraClass: r.opvarmningStartOverride ? "pinned" : "",
         title: `${r.hold}\nOpvarmning ${r.opvarmningStart}–${r.opvarmningSlut}\nGår på ${r.opvisningTid} i ${r.opvisningHal}`
+          + (r.kommentar ? `\n💬 ${r.kommentar}` : "")
           + "\nTræk for at flytte opvarmningen",
         onClick: open,
         dragId: r.id,
@@ -1252,6 +1254,8 @@ function renderUnplacedWarmup() {
     const holdText = dragHandleText(row.hold);
     holdText.classList.add("hold-name-readonly");
     const tdHold = cell(holdText, "hold-col");
+    const commentU = buildCommentButton(row);
+    if (commentU) holdText.after(commentU);
     const pin = buildPinNote(row);
     if (pin) tdHold.appendChild(pin);
     tr.appendChild(tdHold);
@@ -1292,7 +1296,10 @@ function renderWarmupTable() {
     if (pin) tdTime.appendChild(pin);
     const holdText = dragHandleText(row.hold);
     holdText.classList.add("hold-name-readonly");
-    tr.append(tdTime, cell(holdText, "hold-col"));
+    const tdHoldW = cell(holdText, "hold-col");
+    const commentW = buildCommentButton(row);
+    if (commentW) holdText.after(commentW);
+    tr.append(tdTime, tdHoldW);
     appendWarmupCells(tr, row);
     return tr;
   }));
@@ -1432,6 +1439,8 @@ function renderTableBody(rows) {
       holdInput.addEventListener("change", () => patchRow(row.id, "hold", holdInput.value));
       tdHold.appendChild(holdInput);
     }
+    const comment = buildCommentButton(row);
+    if (comment) tdHold.firstChild.after(comment);
     if (row.problemMessage) {
       tdHold.appendChild(warningMessage(row.problemMessage));
     }
@@ -1499,6 +1508,27 @@ function patchRow(id, field, value) {
 
 function swapWarmupTime(draggedId, targetId) {
   return update(apiJSON("/api/rows/swap-warmup-time", "POST", { draggedId, targetId }));
+}
+
+// 💬 ved et hold, der har en kommentar i Excel-filen (ønsker, gengangere ...).
+// Peg for at læse den, klik for at åbne den i et lille vindue. null hvis
+// holdet ingen kommentar har.
+function buildCommentButton(row) {
+  if (!row.kommentar) return null;
+  const btn = iconButton("comment", `Kommentar: ${row.kommentar}`, (e) => {
+    e.stopPropagation();
+    showComment(row);
+  }, "comment-btn");
+  btn.setAttribute("aria-label", `Læs kommentaren fra ${row.hold}`);
+  return btn;
+}
+
+function showComment(row) {
+  document.getElementById("comment-title").textContent = row.hold;
+  document.getElementById("comment-meta").textContent = row.opvisningTid
+    ? `Går på ${row.opvisningTid} i ${row.opvisningHal}` : row.opvisningHal;
+  document.getElementById("comment-text").textContent = row.kommentar;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("comment-dialog")).show();
 }
 
 // "fast tid · slip" under et hold, der er trukket til et bestemt tidspunkt.

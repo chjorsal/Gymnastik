@@ -389,6 +389,27 @@ def run():
     times = [r["opvisningTid"] for r in sorted(actions.payload(cz)["rows"], key=lambda r: r["order"])]
     check("show times follow the new order without gaps or doubles", times == ["09:00", "09:10", "09:20", "09:30"], times)
 
+    # ---------- kommentaren fra Excel ----------
+    buf = BytesIO()
+    pd.DataFrame({"Tid": ["09:00", ""], "Varighed": [10, 10], "Holdnavn": ["Med ønske", "Uden"],
+                  "Kommentar": ["Vil gerne på inden kl. 14.\nGengangere med Hinnerup.", None],
+                  "Kontaktperson": ["Hemmelig Person", "X"], "Kontaktperson email": ["hemmelig@example.dk", "y"]}
+                 ).to_excel(buf, index=False)
+    kp = actions.start_plan()
+    actions.upload(kp, [("k.xlsx", buf.getvalue())], show_hal="Hal 1")
+    rows = {r["hold"]: r for r in actions.payload(kp)["rows"]}
+    check("the Kommentar column is read in and shown per team",
+          rows["Med ønske"]["kommentar"] == "Vil gerne på inden kl. 14.\nGengangere med Hinnerup."
+          and rows["Uden"]["kommentar"] is None, rows["Med ønske"])
+    check("contact person and email are never read in",
+          "Hemmelig" not in json.dumps(kp) and "hemmelig@" not in json.dumps(kp))
+    sheets = pd.read_excel(BytesIO(actions.export_xlsx(kp)), sheet_name=None)
+    check("the comment is a column in the exported plan",
+          list(sheets["Opvisning Hal 1"]["Kommentar"].fillna(""))[:2] == ["Vil gerne på inden kl. 14.\nGengangere med Hinnerup.", ""])
+    old_plan = actions.migrate(json.loads(json.dumps({**kp, "raw_rows": [{k: v for k, v in r.items() if k != "Kommentar"}
+                                                                          for r in kp["raw_rows"]]})))
+    check("plans saved before comments existed still work", all(r["kommentar"] is None for r in actions.payload(old_plan)["rows"]))
+
     # ---------- omdøb haller: navne skal være unikke ----------
     rp = plan_with_halls()
     actions.upload(rp, [("d.xlsx", excel_bytes([("A", 10)]))], show_hal="Sal A")
