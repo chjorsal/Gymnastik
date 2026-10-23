@@ -58,6 +58,11 @@ const Api = (() => {
       if (hal) fd.append("show_hal", hal);
       return readJson(await send("/api/upload", { method: "POST", body: fd }));
     },
+    async uploadEfterskoler(file) {
+      const fd = new FormData();
+      fd.append("file", file);
+      return readJson(await send("/api/efterskoler", { method: "POST", body: fd }));
+    },
     async uploadToHalls(items) {
       const fd = new FormData();
       items.forEach(({ file, hal }) => { fd.append("files", file); fd.append("halls", hal); });
@@ -82,6 +87,10 @@ const Api = (() => {
     ["POST", /^\/api\/rows\/([^/]+)\/place$/, (m, b) => ["place_warmup", { row_id: decodeURIComponent(m[1]), hal: b.hal, start: b.start }]],
     ["GET", /^\/api\/solve$/, () => ["solve", {}]],
     ["POST", /^\/api\/solution$/, (m, b) => ["apply_solution", { changes: b.changes }]],
+    ["POST", /^\/api\/efterskoler\/day$/, (m, b) => ["set_efterskole_day", { day: b.day }]],
+    ["DELETE", /^\/api\/efterskoler$/, () => ["remove_efterskole_list", {}]],
+    ["POST", /^\/api\/rows\/([^/]+)\/efterskole$/, (m, b) => ["assign_efterskole", { row_id: decodeURIComponent(m[1]), name: b.name }]],
+    ["DELETE", /^\/api\/rows\/([^/]+)\/efterskole$/, (m) => ["unassign_efterskole", { row_id: decodeURIComponent(m[1]) }]],
     ["POST", /^\/api\/rows\/move$/, (m, b) => ["move_rows", { row_ids: b.ids, hal: b.hal }]],
     ["POST", /^\/api\/rows\/delete$/, (m, b) => ["delete_rows", { row_ids: b.ids }]],
     ["POST", /^\/api\/rows\/team$/, (m, b) => ["add_team", { hal: b.hal, name: b.name }]],
@@ -216,6 +225,10 @@ const Api = (() => {
       const paths = await writeFiles(files);
       return answer(bridge.upload_files(planJson, JSON.stringify(paths), hal || ""));
     },
+    async uploadEfterskoler(file) {
+      const [path] = await writeFiles([file]);
+      return answer(bridge.upload_efterskoler(planJson, path));
+    },
     async uploadToHalls(items) {
       const paths = await writeFiles(items.map((i) => i.file));
       const pairs = paths.map((path, i) => [path, items[i].hal]);
@@ -256,6 +269,7 @@ const Api = (() => {
     request: (method, url, body) => transport.request(method, url, body),
     upload: (files, hal) => transport.upload(files, hal),
     uploadToHalls: (items) => transport.uploadToHalls(items),
+    uploadEfterskoler: (file) => transport.uploadEfterskoler(file),
     exportPlan: (name) => transport.exportPlan(name),
     onExternalChange: (cb) => transport.onExternalChange(cb),
     savePlanFile: () => transport.savePlanFile(),
