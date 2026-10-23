@@ -16,7 +16,7 @@ import pandas as pd
 from playwright.sync_api import sync_playwright
 
 import testkit
-from testkit import check, excel_bytes, free_port, start_server, summary, wait_for
+from testkit import SECRETS, check, efterskole_bytes, excel_bytes, free_port, start_server, summary, wait_for
 
 HERE = Path(__file__).parent
 testkit.VERBOSE = True
@@ -531,6 +531,74 @@ def comment_tests(page, tmp):
     check("Esc lukker vinduet", True)
 
 
+def efterskole_tests(page, tmp):
+    """Efterskolelisten: indlæs, vælg dag, sæt efterskoler på pladserne "EFTERSKOLE …"."""
+    api(page, "POST", "/api/reset")
+    refresh(page)
+    prog = Path(tmp) / "pladser.xlsx"
+    prog.write_bytes(excel_bytes([("Hold A", 10), ("EFTERSKOLE 1", 10), ("Hold B", 20), ("EFTERSKOLE 2", 10),
+                                  ("EFTERSKOLE 3", 10)], start="12:30"))
+    page.evaluate("() => { uploadTarget = STATE.showHalls[0].name; fileHandler = null; }")
+    page.set_input_files("#file-input", str(prog))
+    page.wait_for_function("() => STATE.rows.some(r => r.hold === 'EFTERSKOLE 3')")
+    page.click(".rail-link[data-view=program]")
+    page.locator("#hal-tabs .tab").first.click()
+    page.fill("#hal-start-time", "12:30")
+    page.press("#hal-start-time", "Tab")
+    page.wait_for_function("() => STATE.rows.find(r => r.hold === 'EFTERSKOLE 2').opvisningTid === '13:10'")
+    check("panelet er skjult uden en efterskoleliste", page.is_hidden("#eft-panel"))
+
+    eft = Path(tmp) / "EFTERSKOLER.xlsx"
+    eft.write_bytes(efterskole_bytes())
+    page.set_input_files("#eft-input", str(eft))
+    page.wait_for_function("() => STATE.efterskoler")
+    check("listen vises og beder om en dag", page.is_visible("#eft-panel")
+          and "Vælg, hvilken dag" in page.inner_text("#eft-note")
+          and page.locator("#eft-day option").count() == 3)
+    check("ingen vælger ved pladserne før dagen er valgt", page.locator("#table-body .eft-select").count() == 0)
+    page.select_option("#eft-day", "Hammel - lørdag 6. marts 2027")
+    page.wait_for_function("() => STATE.efterskoler.day")
+    check("lørdagens tre efterskoler står som mangler en plads", page.locator("#eft-list .eft-chip").count() == 3
+          and "3 efterskoler mangler" in page.inner_text("#eft-note"), page.inner_text("#eft-note"))
+    check("kommentaren fra listen kan læses", page.locator("#eft-list .comment-btn").count() == 1)
+
+    def options(name):
+        row = page.locator("#table-body tr", has_text=name)
+        return [o for o in row.locator(".eft-select option").all_inner_texts()][1:]
+    before, after = options("EFTERSKOLE 1"), options("EFTERSKOLE 2")
+    check("pladsen før kl. 13 tilbyder kun efterskoler, der må gå på før 13",
+          any("Alfa" in o for o in before) and any("Gamma" in o for o in before)
+          and not any("Beta" in o for o in before), before)
+    check("pladsen efter kl. 13 tilbyder ikke Alfa", not any("Alfa" in o for o in after)
+          and any("Beta" in o for o in after), after)
+
+    page.locator("#table-body tr", has_text="EFTERSKOLE 1").locator(".eft-select").select_option("Alfa Efterskole")
+    page.wait_for_function("() => STATE.rows.some(r => r.hold === 'Alfa Efterskole')")
+    row = page.locator("#table-body tr", has_text="Alfa Efterskole")
+    check("efterskolen står på pladsen med antal og ønske",
+          "40 pers." in row.inner_text() and "før kl. 13" in row.inner_text(), row.inner_text())
+    check("kommentaren følger med til programmet", row.locator(".comment-btn").count() == 1)
+    check("Alfa er ikke længere på listen", page.locator("#eft-list .eft-chip").count() == 2
+          and "Alfa" not in page.inner_text("#eft-list"))
+    row.locator(".eft-badge .pin-release").click()
+    page.wait_for_function("() => STATE.rows.some(r => r.hold === 'EFTERSKOLE 1')")
+    check("fjern gør pladsen tom igen", page.locator("#eft-list .eft-chip").count() == 3)
+
+    page.locator("#table-body tr", has_text="EFTERSKOLE 2").locator(".eft-select").select_option("Beta Efterskole")
+    page.wait_for_function("() => STATE.rows.some(r => r.hold === 'Beta Efterskole')")
+    page.fill("#hal-start-time", "10:00")
+    page.press("#hal-start-time", "Tab")
+    page.wait_for_function("() => STATE.rows.some(r => r.wishWarning)")
+    check("en efterskole flyttet før kl. 13 får en advarsel",
+          "Ønsker at gå på efter kl. 13" in page.locator("#table-body tr", has_text="Beta Efterskole").inner_text())
+    check("ingen personoplysninger fra listen på siden", not any(s in page.content() for s in SECRETS))
+
+    page.click("#eft-remove")
+    page.wait_for_function("() => !STATE.efterskoler")
+    check("fjern listen: panelet forsvinder, Beta bliver stående",
+          page.is_hidden("#eft-panel") and page.locator("#table-body tr", has_text="Beta Efterskole").count() == 1)
+
+
 def drop_files(page, selector, files):
     """Slipper filer fra 'computeren' på elementet. files: [(navn, bytes)]."""
     import base64
@@ -789,6 +857,7 @@ def run(mode):
             program_move_tests(page, tmp)
             earlier_tests(page, tmp, dialogs)
             comment_tests(page, tmp)
+            efterskole_tests(page, tmp)
             drop_tests(page, tmp, dialogs)
             if mode == "server":
                 check("data-sektionen er skjult i serverudgaven", page.is_hidden("#data-section"))

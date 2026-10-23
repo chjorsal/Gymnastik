@@ -6,7 +6,7 @@
 <title>Opvarmningsplanlægger</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="vendor/bootstrap.min.css">
-<link rel="stylesheet" href="style.css?v=55">
+<link rel="stylesheet" href="style.css?v=56">
 </head>
 <body>
 <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -155,6 +155,10 @@
           Programmet starter
           <input type="text" id="hal-start-time" placeholder="09:00" class="form-control start-time-input">
         </label>
+        <input type="file" id="eft-input" accept=".xlsx" class="visually-hidden" tabindex="-1">
+        <button id="btn-efterskoler" type="button" class="btn btn-outline-secondary" title="Indlæs listen over efterskoler, deres antal og ønsker om før eller efter kl. 13">
+          Efterskoleliste
+        </button>
         <div class="dropdown">
           <button id="btn-add-menu" type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -179,6 +183,17 @@
               Faneudmarch</button></li>
           </ul>
         </div>
+      </div>
+
+      <div id="eft-panel" class="eft-panel hidden" role="region" aria-label="Efterskolelisten">
+        <div class="eft-head">
+          <strong>Efterskolelisten</strong>
+          <span id="eft-file" class="eft-file"></span>
+          <select id="eft-day" class="form-select form-select-sm eft-day" aria-label="Dag i efterskolelisten"></select>
+          <button id="eft-remove" type="button" class="btn btn-sm eft-remove">Fjern listen</button>
+        </div>
+        <p id="eft-note" class="eft-note"></p>
+        <ul id="eft-list" class="eft-list"></ul>
       </div>
 
       <div id="bulk-bar" class="bulk-bar hidden" role="region" aria-label="Valgte hold">
@@ -365,7 +380,7 @@
 
 <script src="vendor/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
-<script src="api.js?v=12"></script>
-<script src="app.js?v=59"></script>
+<script src="api.js?v=13"></script>
+<script src="app.js?v=60"></script>
 </body>
 </html>

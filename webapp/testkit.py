@@ -63,6 +63,36 @@ def start_server(tmp):
     return proc, url
 
 
+# Personoplysninger i den falske efterskoleliste. De må aldrig nå planen.
+SECRETS = ("Hemmelig Lærer", "Kontakt Person", "hemmelig@example.dk", "12345678", "Brevflet-data")
+
+
+def efterskole_bytes() -> bytes:
+    """En lille efterskoleliste som DGI's: arket "Deltagerdata" med to dage og
+    et ark "Brevflet" med tilmeldingsdata, der aldrig må læses."""
+    sat = "Hammel - lørdag 6. marts 2027 "
+    sun = "Hammel - søndag 7. marts 2027 "
+    header = ["Efterskole", "ANTAL", "LÆRERE", "KONTAKTPERSON", "EMAIL", "MOBIL",
+              sat + "Før kl. 13.00", sat + "Efter kl. 13.00", sun + "Før kl. 13.00", sun + "Efter kl. 13.00",
+              "Kommentar"]
+    secret = ["Hemmelig Lærer", "Kontakt Person", "hemmelig@example.dk", "12345678"]
+    rows = [
+        ["DGI Efterskoler 2027", None, None, None, None, None, None, None, None, None, None],
+        header,
+        ["Alfa Efterskole", 40, *secret, 1, None, None, None, "Gengangere med Beta"],
+        ["Beta Efterskole", 55, *secret, None, 1, None, 1, None],
+        ["Gamma Efterskole", 30, *secret, 1, 1, None, None, None],
+        ["Delta Efterskole", 25, *secret, None, None, 1, None, None],
+        [None, 150, None, None, None, None, 2, 2, 1, 1, None],
+    ]
+    buf = BytesIO()
+    with pd.ExcelWriter(buf) as xw:
+        pd.DataFrame(rows).to_excel(xw, sheet_name="Deltagerdata", index=False, header=False)
+        pd.DataFrame([["Efterskole", "Navn", "Før kl. 13"], ["Alfa Efterskole", "Brevflet-data", 1]]).to_excel(
+            xw, sheet_name="Brevflet", index=False, header=False)
+    return buf.getvalue()
+
+
 def excel_bytes(teams, start="09:00") -> bytes:
     """En lille Excel-fil i hukommelsen. teams: holdnavne eller
     (holdnavn, varighed); varighed er 10 min, hvis den ikke er givet. Første

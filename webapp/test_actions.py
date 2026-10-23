@@ -13,7 +13,7 @@ import pandas as pd
 from planner import actions
 from planner.actions import ActionError
 
-from testkit import check, excel_bytes, summary
+from testkit import SECRETS, check, efterskole_bytes, excel_bytes, summary
 
 
 def raises(fn, status=None):
@@ -795,7 +795,7 @@ def run():
     plan = plan_with_halls()
     actions.upload(plan, [("d.xlsx", excel_bytes([("Hold 1", 10)]))], show_hal="Sal A")
     p = actions.payload(plan)
-    check("payload has the frontend keys", set(p) == {"warmupHalls", "priorityHall", "showHalls", "rows", "schedule"})
+    check("payload has the frontend keys", set(p) == {"warmupHalls", "priorityHall", "showHalls", "rows", "schedule", "efterskoler"})
     check("payload row is placed", p["rows"][0]["status"] == "OK", p["rows"][0])
     data = actions.export_xlsx(plan)
     sheets = pd.read_excel(BytesIO(data), sheet_name=None)
@@ -816,6 +816,123 @@ def run():
         check(f"migrate rejects {bad!r}", raises(lambda: actions.migrate(bad), 400) is not None)
     check("import_plan rejects invalid JSON", raises(lambda: actions.import_plan("{ikke json"), 400) is not None)
     check("import_plan round-trips a plan", actions.import_plan(json.dumps(plan)) == plan)
+
+    # ---------- efterskolelisten ----------
+    plan = plan_with_halls()
+    # Sal A starter 12:30: Hold A 12:30, EFTERSKOLE 1 12:40 (før 13),
+    # Hold B 12:50, EFTERSKOLE 2 13:10 og EFTERSKOLE 3 13:20 (efter 13).
+    actions.upload(plan, [("prog.xlsx", excel_bytes(
+        [("Hold A", 10), ("EFTERSKOLE 1", 10), ("Hold B", 20), ("EFTERSKOLE 2", 10), ("EFTERSKOLE 3", 10)],
+        start="12:30"))], show_hal="Sal A")
+    ids = {r["Hold"]: r["id"] for r in plan["raw_rows"]}
+    p1, p2, p3 = ids["EFTERSKOLE 1"], ids["EFTERSKOLE 2"], ids["EFTERSKOLE 3"]
+    p = actions.payload(plan)
+    check("no list loaded: payload efterskoler is None", p["efterskoler"] is None)
+    check("placeholder rows are marked", {r["hold"] for r in p["rows"] if r["placeholder"]} ==
+          {"EFTERSKOLE 1", "EFTERSKOLE 2", "EFTERSKOLE 3"})
+    e = raises(lambda: actions.import_efterskoler(plan, "prog.xlsx", excel_bytes(["Hold X"])))
+    check("a club program is not taken for an efterskole list", e and "efterskoleliste" in e.message, e)
+    e = raises(lambda: actions.import_efterskoler(plan, "skrald.xlsx", b"ikke excel"))
+    check("a broken file gives a Danish error", e and "skrald.xlsx" in e.message, e)
+    e = raises(lambda: actions.assign_efterskole(plan, p1, "Alfa Efterskole"))
+    check("assigning without a list is refused", e is not None)
+
+    actions.import_efterskoler(plan, "EFTERSKOLER.xlsx", efterskole_bytes())
+    saved = json.dumps(plan, ensure_ascii=False)
+    check("no personal data from the list is stored in the plan",
+          not any(s in saved for s in SECRETS), [s for s in SECRETS if s in saved])
+    e_view = actions.payload(plan)["efterskoler"]
+    check("two days found, none chosen yet", e_view["days"] == ["Hammel - lørdag 6. marts 2027",
+                                                                "Hammel - søndag 7. marts 2027"]
+          and e_view["day"] is None and e_view["schools"] == [], e_view)
+    check("an unknown day is refused", raises(lambda: actions.set_efterskole_day(plan, "fredag")) is not None)
+    actions.set_efterskole_day(plan, "Hammel - lørdag 6. marts 2027")
+    schools = {s["name"]: s for s in actions.payload(plan)["efterskoler"]["schools"]}
+    check("only Saturday's schools, the total row is skipped",
+          set(schools) == {"Alfa Efterskole", "Beta Efterskole", "Gamma Efterskole"}, schools)
+    check("wishes, antal and comment are read",
+          (schools["Alfa Efterskole"]["wish"], schools["Beta Efterskole"]["wish"], schools["Gamma Efterskole"]["wish"],
+           schools["Alfa Efterskole"]["antal"], schools["Alfa Efterskole"]["comment"])
+          == ("før", "efter", None, 40, "Gengangere med Beta"), schools)
+
+    e = raises(lambda: actions.assign_efterskole(plan, p2, "Alfa Efterskole"))
+    check("a school wishing before 13 cannot take a place at 13:10",
+          e and "før kl. 13" in e.message and "13:10" in e.message, e)
+    e = raises(lambda: actions.assign_efterskole(plan, ids["Hold A"], "Gamma Efterskole"))
+    check("a real team is not a place for an efterskole", e and "EFTERSKOLE" in e.message, e)
+    check("an unknown school is refused", raises(lambda: actions.assign_efterskole(plan, p1, "Ukendt")) is not None)
+    check("a school only on Sunday is refused",
+          raises(lambda: actions.assign_efterskole(plan, p1, "Delta Efterskole")) is not None)
+    check("a missing row gives 404", raises(lambda: actions.assign_efterskole(plan, "nope", "Alfa Efterskole"), 404))
+
+    actions.assign_efterskole(plan, p1, "Alfa Efterskole")
+    p = actions.payload(plan)
+    row = next(r for r in p["rows"] if r["id"] == p1)
+    check("the school takes the place with antal, comment and wish",
+          (row["hold"], row["antal"], row["kommentar"], row["wish"], row["holdtype"], row["efterskole"], row["wishWarning"])
+          == ("Alfa Efterskole", 40, "Gengangere med Beta", "før", "efterskole", True, ""), row)
+    check("the placed school leaves the free list",
+          next(s for s in p["efterskoler"]["schools"] if s["name"] == "Alfa Efterskole")["rowId"] == p1)
+    e = raises(lambda: actions.assign_efterskole(plan, p3, "Alfa Efterskole"))
+    check("a school cannot get two places", e and "allerede" in e.message, e)
+    check("negative warm-up minutes are refused",
+          raises(lambda: actions.patch_row(plan, ids["Hold A"], "opvarmningMin", -5)) is not None)
+    check("a placed school cannot be renamed", raises(lambda: actions.patch_row(plan, p1, "hold", "Andet navn")) is not None)
+    actions.add_special_row(plan, "Sal A", "pause")
+    actions._find_row(plan, plan["raw_rows"][-1]["id"])["Hold"] = "EFTERSKOLE 9"
+    check("a pause named EFTERSKOLE is not a place",
+          raises(lambda: actions.assign_efterskole(plan, plan["raw_rows"][-1]["id"], "Gamma Efterskole")) is not None)
+    actions.delete_row(plan, plan["raw_rows"][-1]["id"])
+
+    actions.assign_efterskole(plan, p2, "Gamma Efterskole")
+    check("a school with no wish fits after 13", actions._find_row(plan, p2)["Hold"] == "Gamma Efterskole")
+    actions.assign_efterskole(plan, p2, "Beta Efterskole")
+    check("choosing another school on a taken place frees the first",
+          actions._find_row(plan, p2)["Hold"] == "Beta Efterskole" and
+          next(s for s in actions.payload(plan)["efterskoler"]["schools"] if s["name"] == "Gamma Efterskole")["rowId"] is None)
+
+    again = actions.import_plan(json.dumps(plan))
+    check("a saved plan keeps the schools and the list",
+          actions._find_row(again, p1)["Hold"] == "Alfa Efterskole" and again["efterskoler"]["day"] == plan["efterskoler"]["day"])
+    check("a junk list in a saved plan is dropped", "efterskoler" not in actions.migrate(
+        {**copy.deepcopy(plan), "efterskoler": "vrøvl"}))
+
+    actions.set_show_hall_start_time(plan, "Sal A", "10:00")
+    warn = {r["hold"]: r["wishWarning"] for r in actions.payload(plan)["rows"]}
+    check("a school moved to the wrong side of 13 gets a warning",
+          "efter kl. 13" in warn["Beta Efterskole"] and warn["Alfa Efterskole"] == "", warn)
+    actions.set_show_hall_start_time(plan, "Sal A", "12:30")
+
+    actions.unassign_efterskole(plan, p2)
+    r2 = actions._find_row(plan, p2)
+    check("unassign gives the place its name back", (r2["Hold"], r2["AntalPersoner"], r2.get("Kommentar"), r2.get("Wish"),
+                                                     r2.get("Placeholder")) == ("EFTERSKOLE 2", 0, None, None, None), r2)
+    check("unassign on an empty place gives 404", raises(lambda: actions.unassign_efterskole(plan, p2), 404))
+
+    actions.import_efterskoler(plan, "EFTERSKOLER.xlsx", efterskole_bytes())
+    check("loading the list again keeps the chosen day", plan["efterskoler"]["day"] == "Hammel - lørdag 6. marts 2027")
+    actions.remove_efterskole_list(plan)
+    check("removing the list keeps the placed schools",
+          actions.payload(plan)["efterskoler"] is None and actions._find_row(plan, p1)["Hold"] == "Alfa Efterskole")
+    actions.unassign_efterskole(plan, p1)
+    check("a placed school can be emptied after the list is gone", actions._find_row(plan, p1)["Hold"] == "EFTERSKOLE 1")
+
+    # Find løsning: et forslag om at flytte en efterskole i programmet holder ønsket
+    plan = plan_with_halls()
+    actions.upload(plan, [("prog.xlsx", excel_bytes(
+        [("EFTERSKOLE 1", 10), ("Hold A", 10), ("Hold B", 10), ("Hold C", 40)], start="12:00"))], show_hal="Sal A")
+    actions.import_efterskoler(plan, "E.xlsx", efterskole_bytes())
+    actions.set_efterskole_day(plan, "Hammel - lørdag 6. marts 2027")
+    order = [r["id"] for r in plan["raw_rows"]]
+    actions.assign_efterskole(plan, order[0], "Alfa Efterskole")
+    actions.reorder_rows(plan, "Sal A", order[1:] + order[:1])     # Alfa går nu på 13:00
+    views = actions._views(plan)
+    check("Alfa now has a wish warning", views[order[0]]["opvisningTid"] == "13:00")
+    move = actions._program_move(plan, views, views[order[0]])
+    check("a program move brings the school back before 13", move and move["toTid"] < "13:00", move)
+    plain = actions._program_move(plan, views, views[order[3]])
+    check("a team without a wish is never moved across 13",
+          plain is None or plain["toTid"] >= "13:00" or views[order[3]]["opvisningMin"] < 780, plain)
 
     # ---------- browser-bro (planner.browser) ----------
     import os
@@ -867,6 +984,17 @@ def run():
     res3 = json.loads(browser.upload_files_to_halls(json.dumps(res["plan"]), json.dumps([[path, "Sal A"], [bad, "Sal B"]])))
     check("bridge upload_files_to_halls refuses the whole batch on a bad file",
           res3["ok"] is False and "skrald.xlsx" in res3["error"])
+
+    eft = os.path.join(tmpdir, "EFTERSKOLER.xlsx")
+    with open(eft, "wb") as f:
+        f.write(efterskole_bytes())
+    res4 = json.loads(browser.upload_efterskoler(json.dumps(res["plan"]), eft))
+    check("bridge upload_efterskoler loads the list", res4["ok"] and len(res4["plan"]["efterskoler"]["days"]) == 2, res4)
+    res5 = json.loads(browser.call(json.dumps(res4["plan"]), "set_efterskole_day",
+                                   json.dumps({"day": "Hammel - lørdag 6. marts 2027"})))
+    check("bridge set_efterskole_day works", res5["ok"] and res5["payload"]["efterskoler"]["day"], res5.get("error"))
+    res6 = json.loads(browser.upload_efterskoler(json.dumps(res["plan"]), bad))
+    check("bridge upload_efterskoler refuses a bad file", res6["ok"] is False and res6["error"])
 
     out = os.path.join(tmpdir, "ud.xlsx")
     exp = json.loads(browser.export_to(json.dumps(res["plan"]), out))

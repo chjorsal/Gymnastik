@@ -129,7 +129,7 @@ def compute_plan(
     def warm_min_for(row) -> int:
         override = override_int(row["OpvarmningMinOverride"])
         if override is not None:
-            return override
+            return max(0, override)   # ældre planer kan have et negativt tal
         return opvarmning_minutter(row["Holdtype"])
 
     def hal_override_for(row) -> Optional[str]:

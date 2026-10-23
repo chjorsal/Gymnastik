@@ -75,6 +75,9 @@ def migrate(data) -> dict:
         raise ActionError(INVALID_PLAN)
     for key, default in DEFAULT_PLAN.items():
         data.setdefault(key, copy.deepcopy(default))
+    if data.get("efterskoler") is not None and not (
+            isinstance(data["efterskoler"], dict) and isinstance(data["efterskoler"].get("schools"), list)):
+        data.pop("efterskoler")
     if not isinstance(data["warmup_halls"], list) or not isinstance(data["show_halls"], list) \
             or not isinstance(data["raw_rows"], list):
         raise ActionError(INVALID_PLAN)
@@ -102,7 +105,7 @@ def migrate(data) -> dict:
     # Manuelt oprettede pause/fane-punkter og punkter brugeren selv har
     # omdøbt (HoldEdited) eller selv tilføjet (Manual) røres ikke.
     for row in data["raw_rows"]:
-        if row.get("Type") in ("hold", "andet") and not row.get("HoldEdited") and not row.get("Manual"):
+        if row.get("Type") in ("hold", "andet") and not row.get("HoldEdited") and not row.get("Manual")                 and not row.get("Placeholder"):
             reclassified = engine.classify_type(row.get("Hold", ""))
             if reclassified != "hold" and engine.is_team_by_forening(row.get("Hold"), row.get("Forening")):
                 reclassified = "hold"
@@ -129,13 +132,118 @@ def _compute(plan: dict):
 def payload(plan: dict) -> dict:
     """Det frontenden viser: haller + beregnede rækker og tidsplan."""
     df = _compute(plan)
+    rows = engine.to_row_dicts(df, plan["warmup_halls"])
+    raw = {r["id"]: r for r in plan["raw_rows"]}
+    for v in rows:
+        r = raw[v["id"]]
+        v["placeholder"] = _is_place(r)
+        v["efterskole"] = bool(r.get("Placeholder"))      # en rigtig efterskole sat på en plads
+        v["wish"] = r.get("Wish")
+        v["antal"] = r.get("AntalPersoner")
+        v["wishWarning"] = _wish_warning(v)
     return {
         "warmupHalls": plan["warmup_halls"],
         "priorityHall": plan["priority_hall"],
         "showHalls": plan["show_halls"],
-        "rows": engine.to_row_dicts(df, plan["warmup_halls"]),
+        "rows": rows,
         "schedule": engine.to_schedule(df),
+        "efterskoler": _efterskole_view(plan),
     }
+
+
+# ======================================================
+# EFTERSKOLELISTEN
+# ======================================================
+
+NOON = 13 * 60   # holdene kan ønske at gå på før eller efter kl. 13
+
+
+def _side_of(minutes: Optional[int]) -> Optional[str]:
+    return None if minutes is None else ("efter" if minutes >= NOON else "før")
+
+
+def _is_place(row: dict) -> bool:
+    """En plads til en efterskole: et hold, der hedder "EFTERSKOLE 3", eller
+    som har fået en efterskole fra listen."""
+    return row.get("Type") == "hold" and (bool(row.get("Placeholder")) or engine.is_placeholder(row.get("Hold")))
+
+
+def _wish_warning(view: dict) -> str:
+    wish = view.get("wish")
+    if not wish or view["opvisningMin"] is None or _side_of(view["opvisningMin"]) == wish:
+        return ""
+    return f"Ønsker at gå på {wish} kl. 13 — går på {view['opvisningTid']}"
+
+
+def _efterskole_view(plan: dict) -> Optional[dict]:
+    data = plan.get("efterskoler")
+    if not data:
+        return None
+    assigned = {r.get("Hold"): r["id"] for r in plan["raw_rows"] if r.get("Placeholder")}
+    schools = [{**s, "rowId": assigned.get(s["name"])} for s in engine.schools_for_day(data)]
+    return {"days": data["days"], "day": data.get("day"), "schools": schools}
+
+
+def import_efterskoler(plan: dict, filename: str, content: bytes) -> None:
+    """Indlæser efterskolelisten. Kun navn, antal, dag, ønske og kommentar
+    gemmes. Er der kun én dag i listen, vælges den med det samme."""
+    try:
+        data = engine.parse_efterskole_list(content)
+    except Exception as e:
+        raise ActionError(f"Kunne ikke læse '{filename}' — er det en gyldig Excel-fil (.xlsx)? ({e})")
+    if not data or not data["schools"]:
+        raise ActionError(f"'{filename}' ligner ikke en efterskoleliste — der mangler en kolonne 'Efterskole' "
+                          "og kolonner med 'Før kl. 13' / 'Efter kl. 13'")
+    old_day = (plan.get("efterskoler") or {}).get("day")
+    data["day"] = old_day if old_day in data["days"] else (data["days"][0] if len(data["days"]) == 1 else None)
+    plan["efterskoler"] = data
+
+
+def set_efterskole_day(plan: dict, day: str) -> None:
+    data = plan.get("efterskoler")
+    if not data:
+        raise ActionError("Indlæs efterskolelisten først")
+    if day not in data["days"]:
+        raise ActionError("Dagen findes ikke i efterskolelisten")
+    data["day"] = day
+
+
+def remove_efterskole_list(plan: dict) -> None:
+    """Fjerner listen. Efterskoler, der allerede er sat på en plads, bliver stående."""
+    plan.pop("efterskoler", None)
+
+
+def assign_efterskole(plan: dict, row_id: str, name: str) -> None:
+    """Sætter en efterskole fra listen på en pladsholder ("EFTERSKOLE 3").
+    Pladsen skal ligge på den side af kl. 13, efterskolen har ønsket."""
+    row = _find_row(plan, row_id)
+    if row is None:
+        raise ActionError("Pladsen findes ikke længere", 404)
+    if not _is_place(row):
+        raise ActionError("Efterskoler kan kun sættes på en plads, der hedder 'EFTERSKOLE …'")
+    school = next((s for s in engine.schools_for_day(plan.get("efterskoler")) if s["name"] == name), None)
+    if school is None:
+        raise ActionError("Efterskolen findes ikke i listen for den valgte dag")
+    other = next((r for r in plan["raw_rows"] if r.get("Placeholder") and r.get("Hold") == name and r is not row), None)
+    if other is not None:
+        raise ActionError(f"{name} er allerede sat på en plads ({other['OpvisningHal']})")
+    view = _views(plan)[row_id]
+    if school["wish"] and _side_of(view["opvisningMin"]) != school["wish"]:
+        raise ActionError(f"{name} ønsker at gå på {school['wish']} kl. 13 — pladsen er kl. {view['opvisningTid']}")
+    if row.get("Placeholder"):
+        unassign_efterskole(plan, row_id)
+    row.update({
+        "Placeholder": row["Hold"], "Hold": name, "Type": "hold", "HoldtypeRaw": "efterskole",
+        "AntalPersoner": school["antal"] or 0, "Kommentar": school["comment"], "Wish": school["wish"],
+    })
+
+
+def unassign_efterskole(plan: dict, row_id: str) -> None:
+    """Gør en efterskole til en tom plads igen ("EFTERSKOLE 3")."""
+    row = _find_row(plan, row_id)
+    if row is None or not row.get("Placeholder"):
+        raise ActionError("Der er ingen efterskole på pladsen", 404)
+    row.update({"Hold": row.pop("Placeholder"), "AntalPersoner": 0, "Kommentar": None, "Wish": None})
 
 
 def export_xlsx(plan: dict) -> bytes:
@@ -311,11 +419,15 @@ def patch_row(plan: dict, row_id: str, field: str, value=None) -> None:
                 value = int(value)
             except (TypeError, ValueError):
                 value = None
+        if value is not None and value < 0:
+            raise ActionError("Opvarmningen kan ikke vare under 0 min")
         if value is not None and value > MAX_WARMUP_MINUTES:
             raise ActionError(f"Opvarmningen kan højst vare {MAX_WARMUP_MINUTES} min — den må starte højst "
                               f"{engine.MAX_START_BEFORE_MIN} min før holdet går på, og der skal være "
                               f"{engine.GANG_MIN} min til at gå over")
     if key == "Hold":
+        if row.get("Placeholder"):
+            raise ActionError("Fjern efterskolen fra pladsen først")
         if row.get("Type") == "hold" and not row.get("Manual"):
             raise ActionError("Holdnavn fra Excel-importen kan ikke ændres")
         value = str(value or "").strip()
@@ -686,7 +798,9 @@ def _program_move(plan: dict, views: dict, u: dict) -> Optional[dict]:
     hal = u["opvisningHal"]
     order = [r["id"] for r in sorted(_rows_in(plan, hal), key=lambda r: r["Order"])]
     ok_now = _ok_ids(views)
-    sides = {rid: _after_one(views[rid]["opvisningMin"]) for rid in order}
+    wishes = {r["id"]: r.get("Wish") for r in plan["raw_rows"]}
+    sides = {rid: (wishes[rid] == "efter") if wishes.get(rid) else _after_one(views[rid]["opvisningMin"])
+             for rid in order}
     rest = [rid for rid in order if rid != u["id"]]
     current = order.index(u["id"])
     # nærmeste pladser først; den første, der virker, er den mindste flytning
@@ -694,9 +808,8 @@ def _program_move(plan: dict, views: dict, u: dict) -> Optional[dict]:
         new = rest[:pos] + [u["id"]] + rest[pos:]
         if new == order:
             continue
-        if _after_one(views[u["id"]]["opvisningMin"]) != _after_one(
-                views[order[pos if pos < current else pos]]["opvisningMin"]):
-            continue   # holdet ville skifte side af kl. 13
+        if sides[u["id"]] != _after_one(views[order[pos if pos < current else pos]]["opvisningMin"]):
+            continue   # holdet ville komme på den forkerte side af kl. 13
         trial = copy.deepcopy(plan)
         reorder_rows(trial, hal, new)
         after = _views(trial)

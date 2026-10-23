@@ -20,6 +20,7 @@ ACTIONS = {
     "reset_rows", "create_warmup_hall", "rename_warmup_hall", "delete_warmup_hall",
     "set_priority_hall", "create_show_hall", "rename_show_hall",
     "set_show_hall_start_time", "delete_show_hall",
+    "set_efterskole_day", "remove_efterskole_list", "assign_efterskole", "unassign_efterskole",
 }
 
 
@@ -82,6 +83,13 @@ def upload_files(plan_json: str, paths_json: str, show_hal: str) -> str:
     plan = _plan(plan_json)
     files = [(Path(p).name, Path(p).read_bytes()) for p in json.loads(paths_json)]
     actions.upload(plan, files, show_hal or None)
+    return _result(plan)
+
+
+@_safe
+def upload_efterskoler(plan_json: str, path: str) -> str:
+    plan = _plan(plan_json)
+    actions.import_efterskoler(plan, Path(path).name, Path(path).read_bytes())
     return _result(plan)
 
 

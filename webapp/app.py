@@ -149,6 +149,39 @@ async def upload(files: List[UploadFile] = File(...), show_hal: Optional[str] = 
     return run_action(actions.upload, data, show_hal)
 
 
+@app.post("/api/efterskoler")
+async def upload_efterskoler(file: UploadFile = File(...)):
+    return run_action(actions.import_efterskoler, file.filename, await file.read())
+
+
+class EfterskoleDay(BaseModel):
+    day: str
+
+
+class EfterskoleName(BaseModel):
+    name: str
+
+
+@app.post("/api/efterskoler/day")
+def efterskole_day(payload: EfterskoleDay):
+    return run_action(actions.set_efterskole_day, payload.day)
+
+
+@app.delete("/api/efterskoler")
+def remove_efterskoler():
+    return run_action(actions.remove_efterskole_list)
+
+
+@app.post("/api/rows/{row_id}/efterskole")
+def assign_efterskole(row_id: str, payload: EfterskoleName):
+    return run_action(actions.assign_efterskole, row_id, payload.name)
+
+
+@app.delete("/api/rows/{row_id}/efterskole")
+def unassign_efterskole(row_id: str):
+    return run_action(actions.unassign_efterskole, row_id)
+
+
 @app.post("/api/upload-halls")
 async def upload_halls(files: List[UploadFile] = File(...), halls: List[str] = Form(...)):
     """Filer til flere haller på én gang: halls[i] er hallen for files[i]."""

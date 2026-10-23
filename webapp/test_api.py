@@ -36,7 +36,7 @@ def run():
         status, body = req("GET", "/api/state")
         state = json.loads(body)
         check("GET /api/state -> 200 with frontend keys", status == 200 and
-              set(state) == {"warmupHalls", "priorityHall", "showHalls", "rows", "schedule"})
+              set(state) == {"warmupHalls", "priorityHall", "showHalls", "rows", "schedule", "efterskoler"})
         check("fresh server has no warm-up halls", state["warmupHalls"] == [])
         check("fresh server starts with the show hall 'Hal 1'",
               state["showHalls"] == [{"name": "Hal 1", "startTime": "09:00"}], state["showHalls"])

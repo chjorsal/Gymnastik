@@ -411,6 +411,24 @@ tr.row-problem > td:first-child { box-shadow: inset 4px 0 0 var(--signal); }
 .pin-note .icon svg { width: 12px; height: 12px; }
 .pin-release { border: 0; background: none; padding: 0 2px; color: #c45500; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
+/* Efterskolelisten: efterskoler, der endnu ikke har en plads i programmet. */
+.eft-panel { border: 1px solid var(--line, #e3e6ea); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; background: #fff; }
+.eft-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+#btn-efterskoler { margin-left: auto; margin-right: -8px; }
+.eft-remove { margin-left: auto; color: var(--slate); text-decoration: underline; text-underline-offset: 2px; }
+.eft-remove:hover { color: var(--ink); }
+.eft-file { color: var(--slate); font-size: 13px; }
+.eft-day { width: auto; max-width: 100%; }
+.eft-note { margin: 6px 0 0; font-size: 13.5px; color: var(--slate); }
+.eft-note:empty { display: none; }
+.eft-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.eft-list:empty { display: none; }
+.eft-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); font-size: 13.5px; }
+.eft-chip .comment-btn { min-width: 24px; min-height: 24px; padding: 3px; margin-left: 0; }
+.eft-wish { font-size: 12.5px; color: var(--slate); font-weight: 600; }
+.eft-select { margin-top: 4px; max-width: 320px; }
+.eft-badge { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; font-size: 12.5px; color: var(--slate); font-weight: 600; }
+
 .empty-state { text-align: center; color: var(--slate); padding: 48px 16px; }
 .empty-state p { margin-bottom: 14px; }
 

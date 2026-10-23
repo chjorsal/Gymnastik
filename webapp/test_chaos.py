@@ -24,7 +24,7 @@ import pandas as pd
 import engine
 from planner import actions as A
 from planner import browser
-from testkit import excel_bytes
+from testkit import SECRETS, efterskole_bytes, excel_bytes
 
 HERE = Path(__file__).parent
 REAL = [(f.name, f.read_bytes()) for f in sorted(HERE.parent.glob("*_færdig.xlsx"))] or [
@@ -33,7 +33,10 @@ REAL = [(f.name, f.read_bytes()) for f in sorted(HERE.parent.glob("*_færdig.xls
     for hal in ("Arena", "Hal2")]
 
 WEIRD_TEXT = ["", " ", "   Hal  ", "Arena", "Hal 1", "Hal 2", "Hal 3 A", "Hal 4", "æøå ÆØÅ", "<b>x</b>",
-              "a/b\\c:*?", "x" * 300, "0", "null", "Opvisning", "Pause", "Dørene åbner", "😀 emoji", "\t\n"]
+              "a/b\\c:*?", "x" * 300, "0", "null", "Opvisning", "Pause", "Dørene åbner", "😀 emoji", "\t\n",
+              "EFTERSKOLE 1", " efterskole 12 "]
+EFTERSKOLER = efterskole_bytes()
+SCHOOLS = ["Alfa Efterskole", "Beta Efterskole", "Gamma Efterskole", "Delta Efterskole", "Ukendt", ""]
 WEIRD_TIMES = ["", "9", "09", "9:30", "09:30", "9.30", "930", "0930", "23:59", "00:00", "24:00", "25:00",
                "12:60", "-1", "abc", "9:3", "  10:15 ", "1:2:3", "7.5", None, 930, 9.5]
 WEIRD_NUM = [None, "", 0, 1, 5, 10, 15, 30, 40, 41, 60, 999, -5, "12", "abc", 9.7, "9.7", [1], {"a": 1}, True]
@@ -145,6 +148,14 @@ def check_plan(plan, where):
         for a, b in zip(lst, lst[1:]):
             if b["opvarmningStartMin"] < a["opvarmningSlutMin"]:
                 errs.append(f"overlap i {hal}: {a['hold']} og {b['hold']}")
+    # efterskolelisten: ingen personoplysninger, hver efterskole højst én plads
+    if any(s in json.dumps(plan, ensure_ascii=False) for s in SECRETS):
+        errs.append("personoplysninger fra efterskolelisten er gemt i planen")
+    placed = [r["Hold"] for r in plan["raw_rows"] if r.get("Placeholder")]
+    if len(placed) != len(set(placed)):
+        errs.append(f"en efterskole har fået to pladser: {sorted(placed)}")
+    if any(not engine.is_placeholder(r["Placeholder"]) for r in plan["raw_rows"] if r.get("Placeholder")):
+        errs.append("en efterskole står på en plads, der ikke hedder EFTERSKOLE …")
     # gem og åbn igen giver samme plan
     try:
         again = A.import_plan(json.dumps(plan))
@@ -166,8 +177,10 @@ def random_step(rng, plan, log):
     choice = rng.choices(
         ["upload", "upload_to_halls", "patch", "delete_row", "move_rows", "delete_rows", "special", "team",
          "place", "reorder", "swap", "solve", "apply_junk", "reset", "warm_create", "warm_rename", "warm_delete",
-         "prio", "show_create", "show_rename", "show_time", "show_delete", "export", "reopen"],
-        weights=[4, 2, 14, 2, 3, 1, 3, 3, 6, 4, 4, 2, 1, 0.3, 2, 1.5, 1, 1, 2, 1.5, 3, 0.8, 0.5, 1])[0]
+         "prio", "show_create", "show_rename", "show_time", "show_delete", "export", "reopen",
+         "eft_load", "eft_day", "eft_assign", "eft_unassign", "eft_remove"],
+        weights=[4, 2, 14, 2, 3, 1, 3, 3, 6, 4, 4, 2, 1, 0.3, 2, 1.5, 1, 1, 2, 1.5, 3, 0.8, 0.5, 1,
+                 1, 1, 5, 1.5, 0.3])[0]
     if choice == "upload":
         files = rng.sample(REAL + ODD, rng.randint(1, 2))
         hal = pick(show, None, "", "Ny hal", *WEIRD_TEXT[:4])
@@ -244,7 +257,9 @@ def random_step(rng, plan, log):
             v1 = A._views(plan)
             if v1[m["id"]]["status"] != "OK" or not A._ok_ids(v0) <= A._ok_ids(v1):
                 raise AssertionError("forslaget om at flytte i programmet gav ikke plads eller skubbede hold ud")
+            wish = {r["id"]: r.get("Wish") for r in plan["raw_rows"]}
             if any((v0[i]["opvisningMin"] >= 780) != (v1[i]["opvisningMin"] >= 780)
+                   and (wish.get(i) is None or (v1[i]["opvisningMin"] >= 780) != (wish[i] == "efter"))
                    for i in v0 if v0[i]["opvisningMin"] is not None):
                 raise AssertionError("forslaget om at flytte i programmet flyttede et hold over kl. 13")
             return
@@ -311,6 +326,27 @@ def random_step(rng, plan, log):
         res = json.loads(browser.export_to(json.dumps(plan), str(out), rng.choice(WEIRD_TEXT)))
         if not res["ok"] or not res["filename"].endswith(".xlsx"):
             raise AssertionError(f"eksport via broen fejlede: {res}")
+    elif choice == "eft_load":
+        name_, data = rng.choice([("EFTERSKOLER.xlsx", EFTERSKOLER)] * 3 + ODD[:2])
+        log.append(f"eft_load {name_}")
+        A.import_efterskoler(plan, name_, data)
+    elif choice == "eft_day":
+        day = pick((plan.get("efterskoler") or {}).get("days", []), "fredag", "")
+        log.append(f"eft_day {day!r}")
+        A.set_efterskole_day(plan, day)
+    elif choice == "eft_assign":
+        places = [r["id"] for r in rows if A._is_place(r)]
+        rid = pick(places, *([any_id()] if rng.random() < 0.2 else []))
+        school = rng.choice(SCHOOLS)
+        log.append(f"eft_assign {rid} {school!r}")
+        A.assign_efterskole(plan, rid, school)
+    elif choice == "eft_unassign":
+        rid = pick([r["id"] for r in rows if r.get("Placeholder")], any_id())
+        log.append(f"eft_unassign {rid}")
+        A.unassign_efterskole(plan, rid)
+    elif choice == "eft_remove":
+        log.append("eft_remove")
+        A.remove_efterskole_list(plan)
     elif choice == "reopen":
         log.append("gem og åbn")
         plan.clear()

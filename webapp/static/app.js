@@ -225,6 +225,15 @@ async function init() {
     handler(fileInput.files, uploadTarget);
   });
   document.getElementById("btn-make-plan").addEventListener("click", onMakePlan);
+  const eftInput = document.getElementById("eft-input");
+  document.getElementById("btn-efterskoler").addEventListener("click", () => eftInput.click());
+  eftInput.addEventListener("change", () => onEfterskoleFile(eftInput));
+  document.getElementById("eft-day").addEventListener("change", (e) => {
+    if (e.target.value) update(apiJSON("/api/efterskoler/day", "POST", { day: e.target.value }));
+  });
+  document.getElementById("eft-remove").addEventListener("click", confirmAndRun(
+    "Fjern efterskolelisten? Efterskoler, der allerede har fået en plads, bliver stående.",
+    () => apiJSON("/api/efterskoler", "DELETE")));
   document.querySelectorAll("#btn-upload, .js-upload").forEach((btn) => {
     btn.addEventListener("click", () => chooseFiles(defaultUploadHal()));
   });
@@ -377,6 +386,104 @@ async function uploadFiles(files, hal) {
   const landed = hal || (STATE.showHalls[0] && STATE.showHalls[0].name);
   if (STATE !== before && landed) selectHal(landed);
   render();
+}
+
+// ---------- Efterskolelisten ----------
+
+async function onEfterskoleFile(input) {
+  const [file] = excelOnly(input.files);
+  input.value = "";
+  if (!file) return;
+  await update(handle(Api.uploadEfterskoler(file)));
+}
+
+function wishText(wish) {
+  return wish ? `${wish} kl. 13` : "før eller efter kl. 13";
+}
+
+// Efterskoler fra listen, der endnu ikke har fået en plads.
+function freeSchools() {
+  const e = STATE.efterskoler;
+  return e && e.day ? e.schools.filter((s) => !s.rowId) : [];
+}
+
+function renderEfterskolePanel() {
+  const e = STATE.efterskoler;
+  const panel = document.getElementById("eft-panel");
+  panel.classList.toggle("hidden", !e);
+  if (!e) return;
+  const daySelect = document.getElementById("eft-day");
+  daySelect.replaceChildren(...[["", "Vælg dag …"], ...e.days.map((d) => [d, d])].map(([value, text]) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = text;
+    o.selected = value === (e.day || "");
+    o.disabled = value === "";
+    return o;
+  }));
+  daySelect.classList.toggle("hidden", e.days.length < 2 && !!e.day);
+  document.getElementById("eft-file").textContent = e.day && e.days.length < 2 ? e.day : "";
+  const free = freeSchools();
+  const places = STATE.rows.filter((r) => r.placeholder && !r.efterskole).length;
+  document.getElementById("eft-note").textContent = !e.day
+    ? "Vælg, hvilken dag planen er for."
+    : free.length
+      ? `${plural(free.length, "efterskole mangler", "efterskoler mangler")} en plads. Vælg dem i programmet ved pladserne "EFTERSKOLE …"` +
+        (places ? ` (${plural(places, "ledig plads", "ledige pladser")}).` : " — der er ingen ledige pladser.")
+      : "Alle efterskoler på listen har fået en plads.";
+  document.getElementById("eft-list").replaceChildren(...free.map((s) => {
+    const li = document.createElement("li");
+    li.className = "eft-chip";
+    const name = document.createElement("strong");
+    name.textContent = s.name;
+    const meta = document.createElement("span");
+    meta.className = "eft-wish";
+    meta.textContent = [s.antal ? `${s.antal} pers.` : null, wishText(s.wish)].filter(Boolean).join(" · ");
+    li.append(name, meta);
+    const comment = buildCommentButton({ hold: s.name, kommentar: s.comment, opvisningHal: `Ønsker ${wishText(s.wish)}` });
+    if (comment) li.appendChild(comment);
+    return li;
+  }));
+}
+
+// Under en plads "EFTERSKOLE 3": vælg en efterskole, hvis ønske passer med
+// pladsens tid. Under en efterskole: ønsket og en knap til at gøre den til
+// en tom plads igen. null hvis rækken ingen af delene er.
+function buildEfterskoleControl(row) {
+  if (row.efterskole) {
+    const note = document.createElement("div");
+    note.className = "eft-badge";
+    const undo = document.createElement("button");
+    undo.type = "button";
+    undo.className = "pin-release";
+    undo.textContent = "fjern";
+    undo.title = "Gør pladsen tom igen, så en anden efterskole kan få den";
+    undo.addEventListener("click", () => update(apiJSON(`/api/rows/${row.id}/efterskole`, "DELETE")));
+    const antal = row.antal ? `${row.antal} pers. · ` : "";
+    note.append(document.createTextNode(`${antal}ønsker ${wishText(row.wish)} ·`), undo);
+    return note;
+  }
+  if (!row.placeholder || !STATE.efterskoler || !STATE.efterskoler.day) return null;
+  const side = row.opvisningMin == null ? null : (row.opvisningMin >= 13 * 60 ? "efter" : "før");
+  const fits = freeSchools().filter((s) => !s.wish || s.wish === side);
+  const select = document.createElement("select");
+  select.className = "form-select form-select-sm eft-select";
+  select.setAttribute("aria-label", `Vælg efterskole til ${row.hold}`);
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = fits.length ? "Vælg efterskole …" : `Ingen ledige efterskoler passer kl. ${row.opvisningTid || "—"}`;
+  select.appendChild(first);
+  fits.forEach((s) => {
+    const o = document.createElement("option");
+    o.value = s.name;
+    o.textContent = `${s.name}${s.antal ? ` (${s.antal})` : ""}${s.wish ? "" : " · før/efter"}${s.comment ? " 💬" : ""}`;
+    select.appendChild(o);
+  });
+  select.disabled = !fits.length;
+  select.addEventListener("change", () => {
+    if (select.value) update(apiJSON(`/api/rows/${row.id}/efterskole`, "POST", { name: select.value }));
+  });
+  return select;
 }
 
 async function onOpenPlan(input) {
@@ -1319,6 +1426,7 @@ function renderToolbar() {
 }
 
 function renderTable() {
+  renderEfterskolePanel();
   const states = ["teams-table", "empty-state", "no-hal-state"];
   if (!STATE.showHalls.length) {
     showOneOf("no-hal-state", ...states);
@@ -1441,6 +1549,9 @@ function renderTableBody(rows) {
     }
     const comment = buildCommentButton(row);
     if (comment) tdHold.firstChild.after(comment);
+    const eft = buildEfterskoleControl(row);
+    if (eft) tdHold.appendChild(eft);
+    if (row.wishWarning) tdHold.appendChild(warningMessage(row.wishWarning));
     if (row.problemMessage) {
       tdHold.appendChild(warningMessage(row.problemMessage));
     }
